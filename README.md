@@ -1,4 +1,4 @@
-# Topological NMF - Refactored Implementation
+# NMF with Topological Regularisation
 
 Non-negative Matrix Factorization (NMF) with topological constraints using persistent homology
 
@@ -12,7 +12,6 @@ refactored/
 ├── topological_utils.py        # TDA and embedding functions
 ├── visualization.py            # Plotting functions
 ├── signal_generation.py        # Signal generation utilities
-├── example_notebook.py         # Clean usage example
 └── README.md                   # This file
 ```
 
@@ -90,7 +89,7 @@ Topological data analysis functions.
 Plotting and visualization utilities.
 
 **Key Functions**:
-- `plot_gallery()`: Plot multiple time series in grid
+- `plot_gallery()`: Plot multiple data in grid
 - `plot_persistence_diagrams()`: Plot persistence diagrams
 - `plot_loss()`: Plot training loss curves
 - `plot_time_series_comparison()`: Compare original vs reconstructed
@@ -112,35 +111,6 @@ Synthetic signal generation for testing.
 ```bash
 pip install numpy scipy torch matplotlib seaborn
 pip install scikit-learn gudhi ripser torch-topological tqdm
-```
-
-## Example Workflow
-
-See `example_notebook.py` for a complete example. Basic workflow:
-
-1. **Generate or load data**
-```python
-from signal_generation import generate_triangle_signals, create_time_array
-t = create_time_array()
-signals = generate_triangle_signals(t)
-```
-
-2. **Prepare data**
-```python
-X = np.array([sig / np.max(sig) for sig in signals.values()])
-```
-
-3. **Fit model**
-```python
-model = TopologicalNMF(n_components=2)
-model.fit(X, n_iterations=10000, lambda_top=0.001)
-```
-
-4. **Analyze results**
-```python
-from visualization import plot_fourier_spectrum
-basis = model.get_components()
-plot_fourier_spectrum(basis)
 ```
 
 ## Key Parameters

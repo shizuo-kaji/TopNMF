@@ -378,6 +378,7 @@ class TopologicalNMF:
                         if target_diagrams is not None:
                             # Use target diagram loss
                             loss_PH += self.ph_loss_fn(diags, PH_dims, target_diagrams, self.device)
+
                         if target_periodicity is not None:
                             PH = torch.cat([diags[dim].diagram for dim in PH_dims])
                             pers1 = torch.diff(PH, dim=1).reshape(-1)

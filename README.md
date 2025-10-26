@@ -12,6 +12,7 @@ refactored/
 ├── topological_utils.py        # TDA and embedding functions
 ├── visualization.py            # Plotting functions
 ├── signal_generation.py        # Signal generation utilities
+├── example.ipynb               # Example Jupyter notebook
 └── README.md                   # This file
 ```
 
@@ -19,31 +20,7 @@ refactored/
 
 ### Basic Usage
 
-```python
-import numpy as np
-from topological_nmf import TopologicalNMF
-from signal_generation import generate_triangle_signals, create_time_array
-
-# Generate signals
-t = create_time_array(start=0, stop=2*np.pi, n_points=100)
-signals = generate_triangle_signals(t)
-X = np.array([sig / np.max(sig) for sig in signals.values()])
-
-# Initialize and fit model
-model = TopologicalNMF(n_components=2, device='cpu')
-model.fit(
-    X,
-    n_iterations=10000,
-    lr=0.005,
-    lambda_top=0.001,
-    target_score=[1.0, 0.0]
-)
-
-# Get results
-basis_vectors = model.get_components()
-coefficients = model.transform(X)
-reconstructed = model.inverse_transform()
-```
+Look at the example [Jupyter notebook](example.ipynb) _example.ipynb_.
 
 ## Module Documentation
 

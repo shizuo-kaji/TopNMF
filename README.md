@@ -1,19 +1,39 @@
-# NMF with Topological Regularisation
+# TopNMF: Topological Non-negative Matrix Factorization
 
-Non-negative Matrix Factorization (NMF) with topological constraints using persistent homology
+TopNMF is a NumPy/PyTorch implementation of Non-negative Matrix Factorization (NMF) with
+topological regularisation. The core `TopologicalNMF` class augments standard NMF loss
+with persistent-homology penalties (Vietoris–Rips or Cubical complexes) so that the
+learned basis captures periodic, structured, or sparse behaviours in time-series or image
+signals. This repository also ships utilities for signal generation, topological feature
+engineering, and visualization notebooks.
 
-## Project Structure
+## Repository Layout
 
 ```
-refactored/
-├── __init__.py                 # Package initialization
-├── topological_nmf.py          # Main TopologicalNMF class
-├── nmf_utils.py                # NMF optimization utilities
-├── topological_utils.py        # TDA and embedding functions
-├── visualization.py            # Plotting functions
-├── signal_generation.py        # Signal generation utilities
-├── example.ipynb               # Example Jupyter notebook
-└── README.md                   # This file
+.
+├── TopNMF/                   # Installable Python package
+│   ├── __init__.py           # Re-exports public API (__version__ = 1.0.0)
+│   ├── topological_nmf.py    # TopologicalNMF class + PH loss helpers
+│   ├── nmf_utils.py          # Sparse NMF updates, SVD init, total variation
+│   ├── topological_utils.py  # Time-delay embedding + persistence helpers
+│   ├── signal_generation.py  # Synthetic datasets for demos/tests
+│   └── visualization.py      # Plotting utilities for NMF + TDA outputs
+├── example.ipynb             # Hands-on walkthrough of the pipeline
+└── README.md                 # This document
+```
+
+## Installation
+
+```bash
+# 1. Create and activate a virtual environment (optional but recommended)
+python -m venv .venv
+source .venv/bin/activate
+
+# 2. Install required libraries
+uv pip install numpy scipy torch matplotlib tqdm scikit-learn ripser gudhi torch-topological
+
+# 3. Make the package importable (run from repo root)
+export PYTHONPATH="$PWD:$PYTHONPATH"  # or add the path permanently in your shell profile
 ```
 
 ## Quick Start
@@ -82,13 +102,6 @@ Synthetic signal generation for testing.
 - `generate_noisy_periodic()`: Noisy periodic signals
 - `normalize_signals()`: Signal normalization
 - `create_time_array()`: Time point generation
-
-## Installation Requirements
-
-```bash
-pip install numpy scipy torch matplotlib seaborn
-pip install scikit-learn gudhi ripser torch-topological tqdm
-```
 
 ## Key Parameters
 

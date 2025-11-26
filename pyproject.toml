@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "topnmf"
+version = "1.0.0"
+description = "Non-negative Matrix Factorization with topological regularisation via persistent homology."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+  { name = "TopNMF contributors" }
+]
+keywords = [
+  "nmf",
+  "topological data analysis",
+  "persistent homology",
+  "matrix factorization",
+  "pytorch"
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Mathematics"
+]
+dependencies = [
+  "numpy>=1.23",
+  "scipy>=1.9",
+  "torch>=2.0",
+  "matplotlib>=3.6",
+  "tqdm>=4.64",
+  "scikit-learn>=1.1",
+  "ripser>=0.6",
+  "gudhi>=3.8",
+  "torch-topological>=0.1.7"
+]
+
+[tool.hatch.build]
+exclude = [
+  "/old",
+  "/notes",
+  "/example.ipynb",
+  "/.ipynb_checkpoints"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["TopNMF"]
+
+[tool.hatch.build.targets.sdist]
+include = ["TopNMF", "README.md"]

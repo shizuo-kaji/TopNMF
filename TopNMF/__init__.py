@@ -32,7 +32,7 @@ from .visualization import (
     plot_fourier_spectrum
 )
 from .signal_generation import (
-    generate_triangle_signals,
+    generate_signals,
     generate_mixed_periodic_nonperiodic,
     generate_noisy_periodic,
     generate_complex_signals,
@@ -62,7 +62,7 @@ __all__ = [
     'plot_loss',
     'plot_time_series_comparison',
     'plot_fourier_spectrum',
-    'generate_triangle_signals',
+    'generate_signals',
     'generate_mixed_periodic_nonperiodic',
     'generate_noisy_periodic',
     'generate_complex_signals',

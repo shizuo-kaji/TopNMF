@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import gudhi
 from gudhi.point_cloud.timedelay import TimeDelayEmbedding
-from typing import Optional
+from typing import Optional, List, Tuple
 
 
 def plot_gallery(images, title: str = "", n_col: int = 5, n_row: int = 5,
@@ -128,36 +128,17 @@ def plot_persistence_diagrams(data, n_col: int = 5, n_row: int = 5, superlevel: 
     return axs
 
 
-def plot_loss(losses: dict, ax=None):
-    """
-    Plot training loss curves.
-
-    Parameters
-    ----------
-    losses : dict
-        Dictionary with loss names as keys and loss values as lists
-    ax : matplotlib axis, optional
-        Axis to plot on
-
-    Returns
-    -------
-    matplotlib axis
-        Axis used for plotting
-    """
+def plot_loss(losses, ax=None):
     if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=(8, 5))
-
+        _, ax = plt.subplots(figsize=(8, 5))
     ax.clear()
-
-    for key, values in losses.items():
-        if key != 'lr':  # Don't plot learning rate with losses
-            ax.plot(values, label=key)
-
-    ax.set_xlabel('Iteration')
-    ax.set_ylabel('Loss')
+    for key in losses.keys():
+        ax.plot(losses[key], label=key)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.set_yscale('log')
     ax.legend()
-    ax.grid(True, alpha=0.3)
-
+    ax.grid(True)
     return ax
 
 

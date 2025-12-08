@@ -8,26 +8,44 @@ with various characteristics for testing and experimentation.
 import numpy as np
 from scipy import signal as scipy_signal
 from typing import Dict, Optional
+from scipy import signal
 
 
-def generate_triangle_signals(t: np.ndarray) -> Dict[str, np.ndarray]:
+def generate_signals(t: np.ndarray, kind: str = "cosine") -> Dict[str, np.ndarray]:
     """
-    Generate triangle-like signals with linear trends.
+    Generate either cosine-based or triangle-like signals with linear trends.
 
     Parameters
     ----------
     t : np.ndarray
         Time points array
+    kind : str, optional
+        Type of signals to generate. Options: "cosine", "triangle".
+        Default is "cosine".
 
     Returns
     -------
     Dict[str, np.ndarray]
         Dictionary with signal names as keys and signal arrays as values
     """
-    return {
-        "triangle 1": np.cos(2 * t) + t + 1,
-        "triangle 2": 0.5 * np.cos(2 * t) + 2 * t + 0.5,
-    }
+    
+    kind = kind.lower()
+    
+    if kind == "cosine":
+        return {
+            "cosine 1": np.cos(2 * t) + t + 1,
+            "cosine 2": 0.5 * np.cos(2 * t) + 2 * t + 0.5,
+        }
+
+    elif kind == "triangle":
+        return {
+            "cosine 1": np.cos(2 * t) + t + 1,
+            "triangle 1": 0.5 * signal.sawtooth(2 * t - np.pi, 0.5) + 2 * t + 0.5,
+        }
+
+    else:
+        raise ValueError("kind must be either 'cosine' or 'triangle'")
+
 
 
 def generate_mixed_periodic_nonperiodic(t: np.ndarray) -> Dict[str, np.ndarray]:

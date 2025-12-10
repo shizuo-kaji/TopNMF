@@ -7,7 +7,8 @@ topological constraints using persistent homology.
 
 from .topological_nmf import (
     TopologicalNMF,
-    ph_sparsity_loss
+    ph_sparsity_loss,
+    target_diagram_loss
 )
 from .nmf_utils import (
     update_V,
@@ -46,6 +47,7 @@ __version__ = '1.0.0'
 __all__ = [
     'TopologicalNMF',
     'ph_sparsity_loss',
+    'target_diagram_loss',
     'update_V',
     'sparse_opt',
     'sparse_opt_hoyer',

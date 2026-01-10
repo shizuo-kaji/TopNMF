@@ -48,7 +48,7 @@ from .signal_generation import (
     normalize_signals,
     create_time_array
 )
-from .cubical_complex import CubicalComplex
+
 from .graph_filtration import GraphFiltrationPH
 
 __version__ = '1.0.0'
@@ -59,7 +59,6 @@ __all__ = [
     'ph_sparsity_loss',
     'target_diagram_loss',
     'weighted_persistence_loss',
-    'pers_loss',
     'reconstruction_loss',
     'sparsity_loss',
     # NMF utilities
@@ -90,6 +89,5 @@ __all__ = [
     'generate_step_signals',
     'normalize_signals',
     'create_time_array',
-    'CubicalComplex',
     'GraphFiltrationPH',
 ]

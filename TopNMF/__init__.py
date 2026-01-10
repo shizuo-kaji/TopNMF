@@ -5,10 +5,13 @@ A refactored implementation of Non-negative Matrix Factorization with
 topological constraints using persistent homology.
 """
 
-from .topological_nmf import (
-    TopologicalNMF,
+from .topological_nmf import TopologicalNMF
+from .losses import (
     ph_sparsity_loss,
-    target_diagram_loss
+    target_diagram_loss,
+    weighted_persistence_loss,
+    reconstruction_loss,
+    sparsity_loss,
 )
 from .nmf_utils import (
     update_V,
@@ -30,7 +33,10 @@ from .visualization import (
     plot_persistence_diagrams,
     plot_loss,
     plot_time_series_comparison,
-    plot_fourier_spectrum
+    plot_fourier_spectrum,
+    plot_time_series,
+    plot_gallery_graph,
+    plot_PD_graph,
 )
 from .signal_generation import (
     generate_signals,
@@ -42,12 +48,21 @@ from .signal_generation import (
     normalize_signals,
     create_time_array
 )
+from .cubical_complex import CubicalComplex
+from .graph_filtration import GraphFiltrationPH
 
 __version__ = '1.0.0'
 __all__ = [
+    # Main class
     'TopologicalNMF',
+    # Loss functions
     'ph_sparsity_loss',
     'target_diagram_loss',
+    'weighted_persistence_loss',
+    'pers_loss',
+    'reconstruction_loss',
+    'sparsity_loss',
+    # NMF utilities
     'update_V',
     'sparse_opt',
     'sparse_opt_hoyer',
@@ -64,6 +79,9 @@ __all__ = [
     'plot_loss',
     'plot_time_series_comparison',
     'plot_fourier_spectrum',
+    'plot_time_series',
+    'plot_gallery_graph',
+    'plot_PD_graph',
     'generate_signals',
     'generate_mixed_periodic_nonperiodic',
     'generate_noisy_periodic',
@@ -72,4 +90,6 @@ __all__ = [
     'generate_step_signals',
     'normalize_signals',
     'create_time_array',
+    'CubicalComplex',
+    'GraphFiltrationPH',
 ]

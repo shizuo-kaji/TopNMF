@@ -4,6 +4,9 @@ from typing import List, Tuple, Union
 import gudhi
 from torch_topological.nn import PersistenceInformation
 
+
+__all__ = ['GraphFiltrationPH']
+
 class GraphFiltrationPH(nn.Module):
     def __init__(self, max_dim=1, superlevel: bool = False):
         super().__init__()
@@ -32,7 +35,7 @@ class GraphFiltrationPH(nn.Module):
         st = gudhi.SimplexTree()
         simplex_to_index = {}
         gid = 0
-        
+
         for i in range(num_nodes):
             filtration_val = f_vertices[i].detach().cpu().item()
             st.insert([i], filtration=filtration_val)
@@ -63,21 +66,21 @@ class GraphFiltrationPH(nn.Module):
 
 
         results = []
-        
+
         for dim in [0, 1]:
             diagram_entries = []
             pairing_entries = []
-        
+
             for s1, s2 in st.persistence_pairs():
                 # print(s1,s2)
                 dim_s1 = len(s1) - 1 if s1 else -1
                 dim_s2 = len(s2) - 1 if s2 else -1
                 # feature_dim = max(dim_s1, dim_s2)
                 feature_dim = len(s1) - 1
-        
+
                 if feature_dim != dim:
                     continue
-        
+
                 # === birth filtration ===
                 if len(s1) == 1:
                     b = f_vertices[s1[0]]
@@ -86,7 +89,7 @@ class GraphFiltrationPH(nn.Module):
                     b = edge_weight_filt[idx]
                 else:
                     b = torch.tensor(st.filtration(s1), device=f_vertices.device)
-        
+
                 # === death filtration ===
                 if s2 and len(s2) == 1:
                     d = f_vertices[s2[0]]
@@ -101,44 +104,17 @@ class GraphFiltrationPH(nn.Module):
                 else:
                     d = all_filtration_values.max()
                     d_simplex = None
-        
+
                 diagram_entries.append([b, d])
                 pairing_entries.append([tuple(s1), d_simplex])
-        
+
             if diagram_entries:
                 diagram = torch.stack([torch.stack(p) for p in diagram_entries])
                 pairing = pairing_entries
             else:
                 diagram = torch.zeros((0, 2), dtype=torch.float32, device=f_vertices.device)
                 pairing = []
-        
+
             results.append(PersistenceInformation(pairing=pairing, diagram=diagram, dimension=dim))
 
         return results
-
-
-
-def pers_loss(D1, D2, pow=2, remove_longest_D1=True, remove_longest_D2=False):
-    """Compute the persistence loss between two diagrams."""
-    pers1 = torch.diff(D1, dim=1).reshape(-1)
-    pers1, _ = torch.sort(pers1, dim=0)
-    if remove_longest_D1:
-        pers1 = pers1[:-1]
-
-    pers2 = torch.diff(D2, dim=1).reshape(-1)
-    pers2, _ = torch.sort(pers2, dim=0)
-    if remove_longest_D2:
-        pers2 = pers2[:-1]
-
-    if len(pers1) > len(pers2):
-        p = len(pers1) - len(pers2)
-        loss = (pers1[:p]).pow(pow).sum()
-        if len(pers2) > 0:
-            loss += (pers1[p:] - pers2).abs().pow(pow).sum()
-    else:
-        p = len(pers2) - len(pers1)
-        loss = (pers2[:p]).pow(pow).sum()
-        if len(pers1) > 0:
-            loss += (pers2[p:] - pers1).abs().pow(pow).sum()
-
-    return loss

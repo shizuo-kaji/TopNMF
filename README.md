@@ -11,36 +11,71 @@ engineering, and visualization notebooks.
 
 ```
 .
-├── TopNMF/                   # Installable Python package
-│   ├── __init__.py           # Re-exports public API (__version__ = 1.0.0)
-│   ├── topological_nmf.py    # TopologicalNMF class + PH loss helpers
-│   ├── nmf_utils.py          # Sparse NMF updates, SVD init, total variation
-│   ├── topological_utils.py  # Time-delay embedding + persistence helpers
-│   ├── signal_generation.py  # Synthetic datasets for demos/tests
-│   └── visualization.py      # Plotting utilities for NMF + TDA outputs
-├── example.ipynb             # Hands-on walkthrough of the pipeline
-└── README.md                 # This document
+├── TopNMF/                      # Installable Python package
+│   ├── __init__.py              # Re-exports public API (__version__ = 1.0.0)
+│   ├── topological_nmf.py       # TopologicalNMF class
+│   ├── losses.py                # PH loss functions (sparsity, target diagram, etc.)
+│   ├── nmf_utils.py             # Sparse NMF updates, SVD init, total variation
+│   ├── topological_utils.py     # Time-delay embedding + persistence helpers
+│   ├── cubical_complex.py       # CubicalComplex for image/grid data
+│   ├── graph_filtration.py      # GraphFiltrationPH for graph-based PH
+│   ├── signal_generation.py     # Synthetic datasets for demos/tests
+│   └── visualization.py         # Plotting utilities for NMF + TDA outputs
+├── tests/                       # Pytest unit tests
+│   ├── conftest.py              # Shared fixtures
+│   ├── test_nmf_utils.py        # NMF utility tests
+│   ├── test_signal_generation.py
+│   └── test_topological_utils.py
+├── example.ipynb                # Hands-on walkthrough of the pipeline
+├── pyproject.toml               # Package configuration
+├── AGENTS.md                    # AI agent development guide
+└── README.md                    # This document
 ```
 
 ## Installation
 
 ```bash
-# 1. Create and activate a virtual environment (optional but recommended)
-python -m venv .venv
-source .venv/bin/activate
+# Install from source with pip
+pip install -e .
 
-# 2. Install required libraries
-uv pip install numpy scipy torch matplotlib tqdm scikit-learn ripser gudhi torch-topological
-
-# 3. Make the package importable (run from repo root)
-export PYTHONPATH="$PWD:$PYTHONPATH"  # or add the path permanently in your shell profile
+# Or install with dev dependencies for testing
+pip install -e ".[dev]"
 ```
+
+### Dependencies
+
+- numpy>=1.23
+- scipy>=1.9
+- torch>=2.0
+- matplotlib>=3.6
+- tqdm>=4.64
+- scikit-learn>=1.1
+- ripser>=0.6
+- gudhi>=3.8
+- torch-topological>=0.1.7
 
 ## Quick Start
 
 ### Basic Usage
 
-Look at the example [Jupyter notebook](example.ipynb) _example.ipynb_.
+```python
+from TopNMF import TopologicalNMF, generate_signals, create_time_array
+
+# Generate synthetic signals
+t = create_time_array(0, 4 * np.pi, 200)
+signals = generate_signals(t, kind="cosine")
+X = np.stack(list(signals.values()))
+
+# Fit TopologicalNMF
+model = TopologicalNMF(n_components=2)
+model.fit(X, n_iterations=500, lambda_top=0.01)
+
+# Get results
+V = model.get_components()
+losses = model.get_losses()
+```
+
+See the [example notebook](example.ipynb) for a complete walkthrough.
 
 ## Module Documentation
 
@@ -57,7 +92,18 @@ Main class implementing topological NMF.
 - `get_components()`: Get learned basis vectors
 - `get_losses()`: Get training loss history
 
-### 2. `nmf_utils.py`
+### 2. `losses.py`
+
+Loss functions for topological NMF optimization.
+
+**Key Functions**:
+- `ph_sparsity_loss()`: L1²/L2² ratio for persistence diagrams
+- `target_diagram_loss()`: Compare diagrams to target diagrams
+- `weighted_persistence_loss()`: Weighted persistence with boundary penalty
+- `reconstruction_loss()`: NMF reconstruction error
+- `sparsity_loss()`: Hoyer sparsity or L1²/L2² loss
+
+### 3. `nmf_utils.py`
 
 Core NMF optimization utilities.
 
@@ -69,37 +115,58 @@ Core NMF optimization utilities.
 - `svd_initialization()`: SVD-based initialization
 - `total_variation()`: Total variation regularization
 
-### 3. `topological_utils.py`
+### 4. `topological_utils.py`
 
 Topological data analysis functions.
 
 **Key Functions**:
 - `center_point_cloud()`: Center and normalize point clouds
-- `compute_persistence_score()`: Compute periodicity scores
+- `center_point_cloud_torch()`: PyTorch version with gradient support
+- `compute_periodicity_score()`: Compute periodicity scores
 - `compute_persistence_diagram()`: Full persistence diagram computation
 
 **Key Classes**:
 - `TimeDelayEmbeddingTorch`: PyTorch-based time delay embedding
 
-### 4. `visualization.py`
+### 5. `cubical_complex.py`
+
+Cubical complex for structured data (images, grids).
+
+**Key Class**: `CubicalComplex`
+- Differentiable persistence diagrams for 2D/3D data
+- Supports sublevel and superlevel filtrations
+
+### 6. `graph_filtration.py`
+
+Graph-based persistent homology.
+
+**Key Class**: `GraphFiltrationPH`
+- Computes persistence on graph filtrations
+- Edge weights define filtration values
+
+### 7. `visualization.py`
 
 Plotting and visualization utilities.
 
 **Key Functions**:
-- `plot_gallery()`: Plot multiple data in grid
+- `plot_gallery()`: Plot multiple signals/images in grid
 - `plot_persistence_diagrams()`: Plot persistence diagrams
 - `plot_loss()`: Plot training loss curves
 - `plot_time_series_comparison()`: Compare original vs reconstructed
 - `plot_fourier_spectrum()`: Plot Fourier spectra
+- `plot_time_series()`: Plot time series in grid layout
+- `plot_gallery_graph()`: Visualize graph basis vectors
+- `plot_PD_graph()`: Plot persistence diagrams for graphs
 
-### 5. `signal_generation.py`
+### 8. `signal_generation.py`
 
 Synthetic signal generation for testing.
 
 **Key Functions**:
-- `generate_triangle_signals()`: Triangle-like signals
+- `generate_signals()`: Cosine or triangle signals
 - `generate_mixed_periodic_nonperiodic()`: Mixed components
 - `generate_noisy_periodic()`: Noisy periodic signals
+- `generate_complex_signals()`: Various complex patterns
 - `normalize_signals()`: Signal normalization
 - `create_time_array()`: Time point generation
 
@@ -123,8 +190,22 @@ Synthetic signal generation for testing.
 **Topological**:
 - `M`: Embedding dimension parameter (default: 4)
 - `tau`: Time delay (default: auto-computed)
-- `target_score`: Target persistence scores per component
+- `PH_dims`: Homology dimensions to use (default: [1])
+- `target_diagrams`: Target persistence diagrams
+- `target_periodicity`: Target periodicity scores
 
+## Testing
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=TopNMF
+
+# Run specific test file
+pytest tests/test_nmf_utils.py -v
+```
 
 ## License
 
@@ -132,5 +213,5 @@ MIT
 
 ---
 
-**Version**: 0.0.1
-**Last Updated**: 2025-10-26
+**Version**: 1.0.0
+**Last Updated**: 2025-01-10

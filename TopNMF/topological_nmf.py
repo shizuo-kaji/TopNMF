@@ -131,7 +131,9 @@ class TopologicalNMF:
             tol_count: int = 50000,
             init_method: str = 'nndsvda',
             normalize: bool = False,
+            normalize_V_max: bool = False,
             start_epoch_topological: int = 0,
+            complex_inputs: Optional[Dict[str, object]] = None,
             verbose: bool = True) -> 'TopologicalNMF':
         """
         Fit the TopologicalNMF model to data.
@@ -182,8 +184,12 @@ class TopologicalNMF:
             Initialization method
         normalize : bool, optional
             Whether to normalize W during training
+        normalize_V_max : bool, optional
+            Whether to normalize V by its row-wise maxima during training
         start_epoch_topological : int, optional
             Epoch to start applying topological loss (useful for warm start)
+        complex_inputs : Optional[Dict[str, object]], optional
+            Extra inputs required by custom complexes (e.g., graph edge lists)
         verbose : bool, optional
             Whether to show progress bar
 
@@ -204,6 +210,10 @@ class TopologicalNMF:
                               requires_grad=True)
         self.V = torch.tensor(V, dtype=torch.float, device=self.device,
                               requires_grad=True)
+        if normalize_V_max:
+            with torch.no_grad():
+                normal_value = torch.max(self.V, dim=1).values.unsqueeze(1)
+                self.V /= (normal_value + epsilon)
 
         # Set up time delay embedding and complex
         if self.use_embedding:
@@ -278,6 +288,8 @@ class TopologicalNMF:
                             point_cloud = embedder(v)
                             point_cloud = center_point_cloud_torch(point_cloud)
                             diags = ph_complex(point_cloud)
+                        elif complex_inputs is not None and "all_edges" in complex_inputs:
+                            diags = ph_complex(complex_inputs["all_edges"], v)
                         else:
                             # For images/grids: reshape and pass directly to complex
                             if self.data_shape is not None:
@@ -353,6 +365,9 @@ class TopologicalNMF:
                 if normalize:
                     self.W /= (torch.norm(self.W, p=1, dim=1, keepdim=True) +
                               epsilon)
+                if normalize_V_max:
+                    normal_value = torch.max(self.V, dim=1).values.unsqueeze(1)
+                    self.V /= (normal_value + epsilon)
 
             # Progress display
             if verbose:

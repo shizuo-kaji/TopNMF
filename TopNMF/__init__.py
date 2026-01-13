@@ -50,6 +50,7 @@ from .signal_generation import (
 )
 
 from .graph_filtration import GraphFiltrationPH
+from .cubical_complex import CubicalComplex, PersistenceInfo
 
 __version__ = '1.0.0'
 __all__ = [
@@ -90,4 +91,6 @@ __all__ = [
     'normalize_signals',
     'create_time_array',
     'GraphFiltrationPH',
+    'CubicalComplex',
+    'PersistenceInfo',
 ]

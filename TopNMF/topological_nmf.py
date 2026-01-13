@@ -20,6 +20,15 @@ from .topological_utils import (
     TimeDelayEmbeddingTorch, center_point_cloud_torch
 )
 from .losses import ph_sparsity_loss, target_diagram_loss
+from .visualization import plot_loss, plot_gallery, plot_persistence_diagrams, plot_PD_graph
+
+try:
+    from IPython.display import display, clear_output
+    IPYTHON_AVAILABLE = True
+except ImportError:
+    IPYTHON_AVAILABLE = False
+
+import matplotlib.pyplot as plt
 
 
 class TopologicalNMF:
@@ -134,7 +143,12 @@ class TopologicalNMF:
             normalize_V_max: bool = False,
             start_epoch_topological: int = 0,
             complex_inputs: Optional[Dict[str, object]] = None,
-            verbose: bool = True) -> 'TopologicalNMF':
+            verbose: bool = True,
+            show_plots: Optional[List[str]] = None,
+            disp_interval: int = 100,
+            plot_grid: Tuple[int, int] = (2, 3),
+            PHmode: str = "T",
+            superlevel: bool = False) -> 'TopologicalNMF':
         """
         Fit the TopologicalNMF model to data.
 
@@ -192,6 +206,17 @@ class TopologicalNMF:
             Extra inputs required by custom complexes (e.g., graph edge lists)
         verbose : bool, optional
             Whether to show progress bar
+        show_plots : Optional[List[str]], optional
+            List of plots to display during training. Options: 'loss', 'basis', 'PH'.
+            Requires IPython/Jupyter environment. If None, no plots are shown.
+        disp_interval : int, optional
+            Initial interval (in epochs) for updating displays. Increases by 1.2x after each update.
+        plot_grid : Tuple[int, int], optional
+            (n_row, n_col) for basis and PH plot grids
+        PHmode : str, optional
+            'T' for top-dimensional cells, 'V' for vertices (used for PH plots)
+        superlevel : bool, optional
+            Whether to use superlevel set filtration for PH plots
 
         Returns
         -------
@@ -244,6 +269,28 @@ class TopologicalNMF:
 
         # Loss function
         loss_fn = torch.nn.MSELoss()
+
+        # Set up display if requested
+        show_plots = show_plots or []
+        n_row, n_col = plot_grid
+        Vns = []  # Store V snapshots for visualization
+        current_disp_interval = disp_interval
+
+        if show_plots and IPYTHON_AVAILABLE:
+            if "loss" in show_plots:
+                fig_L, axs_L = plt.subplots(1, 1, figsize=(8, 5))
+                disp_L = display(fig_L, display_id=True)
+
+            if "basis" in show_plots:
+                fig_V, axs_V = plt.subplots(n_row, n_col, figsize=(2. * n_col, 2.26 * n_row))
+                disp_V = display(fig_V, display_id=True)
+
+            if "PH" in show_plots:
+                fig_P, axs_P = plt.subplots(n_row, n_col, figsize=(2. * n_col, 2.26 * n_row), squeeze=False)
+                disp_P = display(fig_P, display_id=True)
+        elif show_plots and not IPYTHON_AVAILABLE:
+            print("Warning: show_plots requires IPython/Jupyter environment. Plots will not be displayed.")
+            show_plots = []
 
         # Training loop
         progress = tqdm(range(n_iterations), disable=not verbose)
@@ -376,6 +423,57 @@ class TopologicalNMF:
                          f'sparsity: {sp_score.item():.6f}, '
                          f'approx: {loss_apx.item():.6f}'
                 )
+
+            # Update plots at specified intervals
+            if show_plots and epoch % int(current_disp_interval) == 0:
+                V_np = self.V.detach().cpu().numpy().copy()
+                Vns.append(V_np)
+
+                if "loss" in show_plots:
+                    plot_loss(self.losses, ax=axs_L)
+                    disp_L.update(fig_L)
+
+                if "basis" in show_plots:
+                    # Reshape V for visualization if data_shape is provided
+                    if self.data_shape is not None:
+                        V_reshaped = V_np.reshape(-1, *self.data_shape)
+                    else:
+                        V_reshaped = V_np
+                    plot_gallery(V_reshaped, title="basis", n_row=n_row, n_col=n_col, axs=axs_V)
+                    disp_V.update(fig_V)
+
+                if "PH" in show_plots:
+                    # Plot persistence diagrams
+                    if complex_inputs is not None and "all_edges" in complex_inputs:
+                        # Graph case
+                        plot_PD_graph(
+                            [V_np[i] for i in range(min(len(V_np), n_row * n_col))],
+                            complex_inputs["all_edges"],
+                            n_col=n_col,
+                            n_row=n_row,
+                            axs=axs_P,
+                            superlevel=superlevel
+                        )
+                    else:
+                        # Image/time series case
+                        if self.data_shape is not None:
+                            V_reshaped = V_np.reshape(-1, *self.data_shape)
+                        else:
+                            V_reshaped = V_np
+                        plot_persistence_diagrams(
+                            V_reshaped,
+                            n_col=n_col,
+                            n_row=n_row,
+                            superlevel=superlevel,
+                            PHmode=PHmode,
+                            M=M,
+                            tau=tau if tau is not None else int(n_features / (2 * (M + 1))),
+                            axs=axs_P
+                        )
+                    disp_P.update(fig_P)
+
+                # Increase display interval
+                current_disp_interval = int(1.2 * current_disp_interval)
 
             # Early stopping
             current = (lambda_top * loss_PH + lambda_spa_V * loss_spa_V +

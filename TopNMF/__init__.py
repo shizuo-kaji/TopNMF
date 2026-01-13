@@ -39,6 +39,7 @@ from .visualization import (
     plot_PD_graph,
 )
 from .signal_generation import (
+    create_ichimatsu_pattern,
     generate_signals,
     generate_mixed_periodic_nonperiodic,
     generate_noisy_periodic,
@@ -82,6 +83,7 @@ __all__ = [
     'plot_time_series',
     'plot_gallery_graph',
     'plot_PD_graph',
+    'create_ichimatsu_pattern',
     'generate_signals',
     'generate_mixed_periodic_nonperiodic',
     'generate_noisy_periodic',

@@ -9,6 +9,7 @@ import numpy as np
 from scipy import signal as scipy_signal
 from typing import Dict, Optional
 from scipy import signal
+import random
 
 def create_ichimatsu_pattern(
     num_samples: int = 100,
@@ -20,33 +21,8 @@ def create_ichimatsu_pattern(
     binarize: bool = False,
     seed: Optional[int] = 42,
 ) -> np.ndarray:
-    """
-    Create a batch of images composed by stamping a small pattern (ichimatsu/checker)
-    at grid-aligned locations.
-
-    Parameters
-    ----------
-    num_samples : int
-        Number of images to generate.
-    image_shape : tuple[int,int]
-        Output image shape (height, width).
-    pat : Optional[np.ndarray]
-        Pattern to stamp. If None, a 3x3 checkerboard is used.
-    pat_step : int
-        Stride step (in pixels) for allowed stamp positions.
-    min_pat, max_pat : int
-        Min/max number of patches to place per image.
-    binarize : bool
-        If True, output images are thresholded to {0,1}.
-    seed : Optional[int]
-        Random seed for reproducibility.
-
-    Returns
-    -------
-    np.ndarray
-        Array of shape (num_samples, H, W) dtype float64.
-    """
-    rng = np.random.default_rng(seed)
+    if seed is not None:
+        random.seed(seed)
 
     if pat is None:
         pat = np.array([[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=float)
@@ -66,21 +42,26 @@ def create_ichimatsu_pattern(
     X = np.zeros((num_samples, ih, iw), dtype=np.float64)
 
     for i in range(num_samples):
-        n_patches = int(rng.integers(min_pat, max_pat + 1))
+        n_patches = random.randint(min_pat, max_pat)
+
         for _ in range(n_patches):
             if max_x_steps > 0:
-                cx = pat_step * int(rng.integers(0, max_x_steps + 1))
+                cx = pat_step * random.randint(0, max_x_steps)
             else:
-                cx = int(rng.integers(0, ih - ph + 1))
+                cx = random.randint(0, ih - ph)
+
             if max_y_steps > 0:
-                cy = pat_step * int(rng.integers(0, max_y_steps + 1))
+                cy = pat_step * random.randint(0, max_y_steps)
             else:
-                cy = int(rng.integers(0, iw - pw + 1))
+                cy = random.randint(0, iw - pw)
+
             X[i, cx:cx + ph, cy:cy + pw] += pat
-        if binarize:
-            X[i] = (X[i] > 0).astype(np.float64)
+
+            if binarize:
+                X[i] = (X[i] > 0).astype(np.float64)
 
     return X
+
 
 def generate_signals(t: np.ndarray, kind: str = "cosine") -> Dict[str, np.ndarray]:
     """

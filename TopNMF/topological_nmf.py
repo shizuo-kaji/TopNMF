@@ -53,7 +53,7 @@ class TopologicalNMF:
                  complex: Optional[object] = None,
                  ph_loss_fn: Optional[Callable] = None,
                  data_shape: Optional[Tuple] = None,
-                 use_embedding: bool = True):
+                 use_embedding: bool = False):
         """
         Initialize TopologicalNMF.
 
@@ -143,6 +143,10 @@ class TopologicalNMF:
             normalize_V_max: bool = False,
             start_epoch_topological: int = 0,
             complex_inputs: Optional[Dict[str, object]] = None,
+            optimizer_cls: Callable = optim.AdamW,
+            optimizer_kwargs: Optional[Dict] = None,
+            scheduler_cls: Optional[Callable] = optim.lr_scheduler.ReduceLROnPlateau,
+            scheduler_kwargs: Optional[Dict] = None,
             verbose: bool = True,
             show_plots: Optional[List[str]] = None,
             disp_interval: int = 100,
@@ -204,6 +208,15 @@ class TopologicalNMF:
             Epoch to start applying topological loss (useful for warm start)
         complex_inputs : Optional[Dict[str, object]], optional
             Extra inputs required by custom complexes (e.g., graph edge lists)
+        optimizer_cls : Callable, optional
+            Optimizer class to use (default: torch.optim.AdamW)
+        optimizer_kwargs : Dict, optional
+            Additional keyword arguments for the optimizer
+        scheduler_cls : Callable, optional
+            Scheduler class to use (default: torch.optim.lr_scheduler.ReduceLROnPlateau).
+            Set to None to disable scheduler.
+        scheduler_kwargs : Dict, optional
+            Additional keyword arguments for the scheduler
         verbose : bool, optional
             Whether to show progress bar
         show_plots : Optional[List[str]], optional
@@ -254,16 +267,35 @@ class TopologicalNMF:
         else:
             ph_complex = VietorisRipsComplex(dim=1, p=2)
 
-        # Set up optimizer
-        opt = optim.AdamW([self.W, self.V], lr=lr, weight_decay=weight_decay)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            opt, factor=0.9, patience=10000
-        )
+        # ---------------------------------------------------------
+        # Optimizer Setup
+        # ---------------------------------------------------------
+        # Prepare optimizer arguments
+        opt_kwargs = optimizer_kwargs or {}
+        # Use provided lr/weight_decay as defaults if not in kwargs
+        opt_kwargs.setdefault('lr', lr)
+        opt_kwargs.setdefault('weight_decay', weight_decay)
+
+        # Initialize Optimizer
+        opt = optimizer_cls([self.W, self.V], **opt_kwargs)
+
+        # ---------------------------------------------------------
+        # Scheduler Setup
+        # ---------------------------------------------------------
+        scheduler = None
+        if scheduler_cls is not None:
+            sch_kwargs = scheduler_kwargs or {}
+            # Set defaults specific to ReduceLROnPlateau if that's what we are using
+            if scheduler_cls == optim.lr_scheduler.ReduceLROnPlateau:
+                sch_kwargs.setdefault('factor', 0.9)
+                sch_kwargs.setdefault('patience', 10000)
+            
+            scheduler = scheduler_cls(opt, **sch_kwargs)
 
         # Compute target L1 for sparsity
         if target_sparsity is not None and target_sparsity > 0:
             target_L1 = (np.sqrt(n_features) -
-                        target_sparsity * (np.sqrt(n_features) - 1))
+                         target_sparsity * (np.sqrt(n_features) - 1))
         else:
             target_L1 = 0
 
@@ -324,7 +356,7 @@ class TopologicalNMF:
                 loss_tv_V = torch.tensor(0., device=self.device)
 
                 # Compute topological loss for each component
-                for j in range(self.n_components - 1):
+                for j in range(self.n_components):
                     v = self.V[j]
 
                     # Topological loss
@@ -387,23 +419,30 @@ class TopologicalNMF:
 
                 # Total loss
                 loss = (lambda_top * loss_PH +
-                       lambda_spa_V * loss_spa_V +
-                       lambda_spa_W * loss_spa_W +
-                       lambda_apx * loss_apx +
-                       lambda_tv * loss_tv_V)
+                        lambda_spa_V * loss_spa_V +
+                        lambda_spa_W * loss_spa_W +
+                        lambda_apx * loss_apx +
+                        lambda_tv * loss_tv_V)
 
                 # Optimization step
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
-                scheduler.step(loss)
+
+                # Scheduler step
+                if scheduler is not None:
+                    if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+                        scheduler.step(loss)
+                    else:
+                        scheduler.step()
 
                 # Record losses
                 self.losses['PH'].append(loss_PH.item())
                 self.losses['approx'].append(loss_apx.item())
                 self.losses['sparse_V'].append(loss_spa_V.item())
                 self.losses['sparse_W'].append(loss_spa_W.item())
-                self.losses['lr'].append(scheduler.get_last_lr()[0])
+                # Log current learning rate
+                self.losses['lr'].append(opt.param_groups[0]['lr'])
 
             # Enforce non-negativity
             with torch.no_grad():
@@ -411,7 +450,7 @@ class TopologicalNMF:
                 self.W.clamp_(min=0)
                 if normalize:
                     self.W /= (torch.norm(self.W, p=1, dim=1, keepdim=True) +
-                              epsilon)
+                               epsilon)
                 if normalize_V_max:
                     normal_value = torch.max(self.V, dim=1).values.unsqueeze(1)
                     self.V /= (normal_value + epsilon)
@@ -420,8 +459,8 @@ class TopologicalNMF:
             if verbose:
                 progress.set_postfix(
                     loss=f'PH: {loss_PH.item():.6f}, '
-                         f'sparsity: {sp_score.item():.6f}, '
-                         f'approx: {loss_apx.item():.6f}'
+                          f'sparsity: {sp_score.item():.6f}, '
+                          f'approx: {loss_apx.item():.6f}'
                 )
 
             # Update plots at specified intervals
@@ -477,7 +516,7 @@ class TopologicalNMF:
 
             # Early stopping
             current = (lambda_top * loss_PH + lambda_spa_V * loss_spa_V +
-                      lambda_spa_W * loss_spa_W + loss_apx)
+                       lambda_spa_W * loss_spa_W + loss_apx)
             if (prev_loss - current) < tol:
                 count += 1
                 if count > tol_count:

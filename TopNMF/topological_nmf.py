@@ -112,6 +112,7 @@ class TopologicalNMF:
         n_samples, n_features = X.shape
 
         if method == 'random':
+            np.random.seed(self.random_state)
             W = np.random.rand(n_samples, self.n_components)
             V = np.random.rand(self.n_components, n_features)
         else:

@@ -12,7 +12,6 @@ from .losses import (
     weighted_persistence_loss,
     reconstruction_loss,
     sparsity_loss,
-    pers_loss,
     clique_deviation_loss,
 )
 from .nmf_utils import (
@@ -65,7 +64,6 @@ __all__ = [
     'weighted_persistence_loss',
     'reconstruction_loss',
     'sparsity_loss',
-    'pers_loss',
     'clique_deviation_loss',
     # NMF utilities
     'update_V',

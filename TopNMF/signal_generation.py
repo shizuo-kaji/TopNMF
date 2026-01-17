@@ -91,8 +91,8 @@ def generate_signals(t: np.ndarray, kind: str = "cosine") -> Dict[str, np.ndarra
 
     elif kind == "triangle":
         return {
-            "cosine 1": np.cos(2 * t) + t + 1,
-            "triangle 1": 0.5 * signal.sawtooth(2 * t - np.pi, 0.5) + 2 * t + 0.5,
+            "triangle 1": signal.sawtooth(2 * t - np.pi, 0.5) + t + 1,
+            "triangle 2": 0.5 * signal.sawtooth(2 * t - np.pi, 0.5) + 2 * t + 0.5,
         }
 
     else:

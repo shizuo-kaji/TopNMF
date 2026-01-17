@@ -379,7 +379,10 @@ class TopologicalNMF:
                             if self.data_shape is not None:
                                 v_shaped = v.reshape(self.data_shape)
                             else:
-                                v_shaped = v
+                                if v.ndim == 1:
+                                    v_shaped = v.unsqueeze(1)
+                                else:
+                                    v_shaped = v
                             diags = ph_complex(v_shaped)
 
                         # Compute loss using configured loss function
@@ -388,13 +391,23 @@ class TopologicalNMF:
                             loss_PH += self.ph_loss_fn(diags, PH_dims, target_diagrams, self.device, **self.ph_loss_params)
 
                         if target_periodicity is not None:
-                            PH = torch.cat([diags[dim].diagram for dim in PH_dims])
-                            pers1 = torch.diff(PH, dim=1).reshape(-1)
-                            if len(pers1) > 0:
-                                periodicity_score = max(pers1) / np.sqrt(3)
+                            # Determine target value for this component
+                            target_val = None
+                            if hasattr(target_periodicity, '__getitem__') and not isinstance(target_periodicity, str):
+                                if j < len(target_periodicity):
+                                    target_val = target_periodicity[j]
                             else:
-                                periodicity_score = 0
-                            loss_PH += (periodicity_score - target_periodicity[j])**2
+                                target_val = target_periodicity
+
+                            # Only calculate loss if target is not None
+                            if target_val is not None:
+                                PH = torch.cat([diags[dim].diagram for dim in PH_dims])
+                                pers1 = torch.diff(PH, dim=1).reshape(-1)
+                                if len(pers1) > 0:
+                                    periodicity_score = max(pers1) / np.sqrt(3)
+                                else:
+                                    periodicity_score = 0
+                                loss_PH += (periodicity_score - float(target_val))**2
 
                     # Total variation loss
                     loss_tv_V += total_variation(v)

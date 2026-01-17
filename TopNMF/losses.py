@@ -209,3 +209,123 @@ def sparsity_loss(v: torch.Tensor, target_sparsity: Optional[float] = None) -> t
     else:
         # L1^2 / L2^2 ratio
         return (v.abs().sum())**2 / ((v**2).sum() + 1e-10)
+
+
+
+def pers_loss(D1, D2, remove_longest_D1=False):
+    """
+    Compute persistence loss between two diagrams.
+    """
+    device = D1.device
+    power = 2
+    loss = torch.tensor(0., device=device)
+    
+    # Calculate persistence (Death - Birth)
+    if D1.numel() > 0:
+        pers1 = torch.diff(D1, dim=1).reshape(-1).abs()
+        # Sort persistence values descending
+        pers1, _ = torch.sort(pers1, dim=0, descending=True)
+    else:
+        pers1 = torch.tensor([], device=device)
+    
+    # Remove longest feature if requested (usually H0 longest bar is inf or very large)
+    if remove_longest_D1 and len(pers1) > 0:
+        pers1 = pers1[1:] # standard remove longest logic typically removes the first one if sorted descending
+        
+    # Process Target D2
+    # Assuming D2 is already sorted persistence values or a diagram
+    if D2 is not None and len(D2) > 0:
+        if isinstance(D2, torch.Tensor):
+             if D2.dim() > 1:
+                 pers2 = torch.diff(D2, dim=1).reshape(-1).abs()
+             else:
+                 pers2 = D2.abs()
+             # Sort persistence values descending to match pers1
+             pers2, _ = torch.sort(pers2, dim=0, descending=True)
+        else:
+             # Handle list or other types if necessary, but assume Tensor for now
+             pers2 = torch.tensor([], device=device)
+    else:
+        pers2 = torch.tensor([], device=device)
+        
+    # Compute L2 distance between sorted persistence values
+    # Pad with zeros to match lengths
+    n1 = len(pers1)
+    n2 = len(pers2)
+    n = max(n1, n2)
+    
+    if n > 0:
+        p1_padded = torch.zeros(n, device=device)
+        p2_padded = torch.zeros(n, device=device)
+        
+        if n1 > 0:
+            p1_padded[:n1] = pers1
+        if n2 > 0:
+            p2_padded[:n2] = pers2
+            
+        loss = ((p1_padded - p2_padded).abs().pow(power)).sum()
+            
+    return loss
+
+def clique_deviation_loss(diags: List, PH_dims: List[int], target_PH: List, device: str, 
+                          alpha: float = 1.0, n_components: Optional[int] = None,
+                          remove_longest: Optional[Dict[int, bool]] = None) -> torch.Tensor:
+    """
+    Clique Deviation Loss.
+    
+    Computes topological loss by subtracting persistence loss from the total loss.
+    Designed to maximize deviation from target diagrams or persistence features.
+    
+    Parameters
+    ----------
+    diags : List
+        List of persistence diagrams (or objects with .diagram attribute)
+    PH_dims : List[int]
+        Dimensions to consider
+    target_PH : List
+        Target persistence diagrams/values
+    device : str
+        Computing device
+    alpha : float
+        Weight for higher dimensions (dim > 0)
+    n_components : int, optional
+        Number of components/basis to normalize the loss by.
+    remove_longest : Dict[int, bool], optional
+        Dictionary specifying whether to remove longest persistence for each dimension.
+        Key is dimension, Value is bool. Default is False for all.
+        
+    Returns
+    -------
+    torch.Tensor
+        Computed loss value (typically negative due to subtraction logic)
+    """
+    # Initialize loss_PH
+    loss_PH = torch.tensor(0., device=device)
+    
+    if remove_longest is None:
+        remove_longest = {}
+
+    for dim in PH_dims:
+        # Check if target_PH has entry for this dim
+        target = target_PH[dim] if dim < len(target_PH) else None
+        
+        # Access diagram. Assuming diags is a list of objects with .diagram attribute
+        if hasattr(diags[dim], 'diagram'):
+            current_diag = diags[dim].diagram
+        else:
+            current_diag = diags[dim]
+        
+        # Determine if we should remove the longest bar for this dimension
+        should_remove = remove_longest.get(dim, False)
+
+        if dim == 0:
+            # User requested logic: loss_PH -= ...
+            loss_PH -= pers_loss(current_diag, target, remove_longest_D1=should_remove)
+        else:
+            # User requested logic: loss_PH -= alpha * ...
+            loss_PH -= alpha * pers_loss(current_diag, target, remove_longest_D1=should_remove)
+            
+    if n_components is not None and n_components > 0:
+        loss_PH /= n_components
+
+    return loss_PH

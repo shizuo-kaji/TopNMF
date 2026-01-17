@@ -20,7 +20,7 @@ from .topological_utils import (
     TimeDelayEmbeddingTorch, center_point_cloud_torch
 )
 from .losses import ph_sparsity_loss, target_diagram_loss
-from .visualization import plot_loss, plot_gallery, plot_persistence_diagrams, plot_PD_graph
+from .visualization import plot_loss, plot_gallery, plot_persistence_diagrams, plot_PD_graph, plot_gallery_graph
 
 try:
     from IPython.display import display, clear_output
@@ -52,6 +52,7 @@ class TopologicalNMF:
                  random_state: Optional[int] = None,
                  complex: Optional[object] = None,
                  ph_loss_fn: Optional[Callable] = None,
+                 ph_loss_params: Optional[Dict] = None,
                  data_shape: Optional[Tuple] = None,
                  use_embedding: bool = False):
         """
@@ -71,6 +72,8 @@ class TopologicalNMF:
         ph_loss_fn : Callable, optional
             Loss function for persistent homology. Should accept (diagrams, PH_dims, target_diagrams, device).
             If None, uses ph_sparsity_loss.
+        ph_loss_params : Dict, optional
+            Additional keyword arguments for the ph_loss_fn.
         data_shape : Tuple, optional
             Shape of each data sample for cubical complexes (e.g., (height, width) for images).
             Only needed when using CubicalComplex or similar.
@@ -83,6 +86,7 @@ class TopologicalNMF:
         self.random_state = random_state
         self.complex = complex
         self.ph_loss_fn = ph_loss_fn if ph_loss_fn is not None else ph_sparsity_loss
+        self.ph_loss_params = ph_loss_params if ph_loss_params is not None else {}
         self.data_shape = data_shape
         self.use_embedding = use_embedding
 
@@ -108,8 +112,8 @@ class TopologicalNMF:
         n_samples, n_features = X.shape
 
         if method == 'random':
-            W = np.abs(np.random.normal(size=(n_samples, self.n_components)))
-            V = np.abs(np.random.normal(size=(self.n_components, n_features)))
+            W = np.random.rand(n_samples, self.n_components)
+            V = np.random.rand(self.n_components, n_features)
         else:
             W, V = _initialize_nmf(
                 X, n_components=self.n_components,
@@ -380,7 +384,7 @@ class TopologicalNMF:
                         # Compute loss using configured loss function
                         if target_diagrams is not None:
                             # Use target diagram loss
-                            loss_PH += self.ph_loss_fn(diags, PH_dims, target_diagrams, self.device)
+                            loss_PH += self.ph_loss_fn(diags, PH_dims, target_diagrams, self.device, **self.ph_loss_params)
 
                         if target_periodicity is not None:
                             PH = torch.cat([diags[dim].diagram for dim in PH_dims])
@@ -473,12 +477,32 @@ class TopologicalNMF:
                     disp_L.update(fig_L)
 
                 if "basis" in show_plots:
-                    # Reshape V for visualization if data_shape is provided
-                    if self.data_shape is not None:
-                        V_reshaped = V_np.reshape(-1, *self.data_shape)
+                    if complex_inputs is not None and "all_edges" in complex_inputs:
+                        # Graph case: Plot basis as graphs
+                        edge_list = complex_inputs["all_edges"]
+                        edge_index = torch.tensor(edge_list, dtype=torch.long).t().contiguous()
+                        # Check for fixed node positions
+                        node_pos = complex_inputs.get("node_pos", None)
+
+                        # V_np contains edge weights for each basis
+                        plot_gallery_graph(
+                            V_np, 
+                            edge_index, 
+                            title="Basis", 
+                            n_col=n_col, 
+                            n_row=n_row, 
+                            axs=axs_V,
+                            pos=node_pos
+                        )
                     else:
-                        V_reshaped = V_np
-                    plot_gallery(V_reshaped, title="basis", n_row=n_row, n_col=n_col, axs=axs_V)
+                        # Image/Signal case
+                        # Reshape V for visualization if data_shape is provided
+                        if self.data_shape is not None:
+                            V_reshaped = V_np.reshape(-1, *self.data_shape)
+                        else:
+                            V_reshaped = V_np
+                        plot_gallery(V_reshaped, title="basis", n_row=n_row, n_col=n_col, axs=axs_V)
+                    
                     disp_V.update(fig_V)
 
                 if "PH" in show_plots:

@@ -133,17 +133,136 @@ def plot_persistence_diagrams(data, n_col: int = 5, n_row: int = 5, superlevel: 
 
 
 def plot_loss(losses, ax=None):
+    """
+    Plot losses with dual y-axes.
+    Left y-axis (log): approx, lr
+    Right y-axis (linear): PH
+    """
     if ax is None:
-        _, ax = plt.subplots(figsize=(8, 5))
+        fig, ax = plt.subplots(figsize=(8, 5))
+    else:
+        fig = ax.figure
+
     ax.clear()
-    for key in losses.keys():
-        ax.plot(losses[key], label=key)
+    # Check if a second axis already exists from previous plot_loss calls
+    if len(fig.axes) > 1 and fig.axes[0] == ax:
+         ax2 = fig.axes[1]
+         ax2.clear()
+    else:
+         ax2 = ax.twinx()   # Create right y-axis
+
+    # Fixed colors
+    colors = {
+        'approx': 'C1',  # Orange
+        'lr':     'C2',  # Green
+        'PH':     'C0',  # Blue
+    }
+
+    # ---------- Left Axis: approx, lr ----------
+    for key in ['approx', 'lr']:
+        if key in losses:
+            y = np.asarray(losses[key])
+            ax.plot(y, label=key, color=colors.get(key, 'k'))
+
     ax.set_xlabel("Epoch")
-    ax.set_ylabel("Loss")
+    ax.set_ylabel("Loss (approx, lr)", size=12)
     ax.set_yscale('log')
-    ax.legend()
-    ax.grid(True)
+
+    # ---------- Right Axis: PH (linear) ----------
+    if 'PH' in losses:
+        ph = np.asarray(losses['PH'])  # Revert to raw values
+        # Use plot on ax2
+        ax2.plot(ph, label='PH', color=colors['PH'])
+
+        ax2.set_ylabel("PH Loss", size=12)
+        
+        # Ensure label and ticks are on the right (fix for ax2.clear() resetting position)
+        ax2.yaxis.tick_right()
+        ax2.yaxis.set_label_position("right")
+
+        # Adjust y-limits for PH with padding
+        if len(ph) > 0:
+            ph_min, ph_max = float(np.min(ph)), float(np.max(ph))
+            if ph_min == ph_max:
+                pad = 0.1 * (abs(ph_min) + 1.0)
+            else:
+                pad = 0.1 * (ph_max - ph_min)
+            ax2.set_ylim(ph_min - pad, ph_max + pad)
+
+        # Scientific notation
+        ax2.ticklabel_format(style='sci', axis='y', scilimits=(-2, 2))
+
+    # ---------- Legend ----------
+    lines1, labels1 = ax.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+
+    # ---------- Grid (Left axis) ----------
+    ax.grid(True, alpha=0.3)
+
     return ax
+
+def plot_gallery_graph(edge_values: Union[np.ndarray, torch.Tensor],
+                       edge_index: torch.Tensor, title: str,
+                       n_col: int, n_row: int, axs, pos=None):
+    """
+    Plot graph visualizations for multiple basis vectors.
+    """
+    # Transpose edge_index from (2, n_edges) to (n_edges, 2)
+    edge_index_pairs = edge_index.transpose(0, 1)
+
+    # Compute node positions if not provided
+    if pos is None:
+        nodes = set(int(u.item()) for u, v in edge_index_pairs) | set(int(v.item()) for u, v in edge_index_pairs)
+        G_temp = nx.Graph()
+        G_temp.add_nodes_from(nodes)
+        G_temp.add_edges_from([(int(u.item()), int(v.item())) for u, v in edge_index_pairs])
+        pos = nx.spring_layout(G_temp, seed=42) # Seed for reproducibility
+
+    # Number of basis vectors to plot
+    num_basis = edge_values.shape[0]
+    max_plots = n_row * n_col
+    n_plots = min(num_basis, max_plots)
+
+    # Initialize all subplot axes
+    for idx in range(max_plots):
+        if n_row > 1:
+            ax = axs[idx // n_col, idx % n_col]
+        else:
+            ax = axs[idx % n_col]
+            
+        ax.clear()
+
+        if idx < n_plots:
+            # Plot the idx-th basis
+            weights = edge_values[idx]
+
+            # Draw edges with weight > 0
+            for j, (u, v) in enumerate(edge_index_pairs):
+                w = weights[j]
+                if isinstance(w, torch.Tensor):
+                    w = w.item()
+                if w <= 0:
+                    continue
+                ux, uy = pos[int(u.item())]
+                vx, vy = pos[int(v.item())]
+                ax.plot(
+                    [ux, vx],
+                    [uy, vy],
+                    color='tab:gray',
+                    linewidth=w * 5
+                )
+            # Draw nodes
+            for node, (x, y) in pos.items():
+                 ax.plot(x, y, 'o', color='black', markersize=2)
+                 
+            ax.set_title(f"{title} {idx}", fontsize=8)
+            ax.set_xticks([])
+            ax.set_yticks([])
+        else:
+            ax.axis('off')
+
+    return axs
 
 
 def plot_time_series_comparison(original, reconstructed, basis_vectors,
@@ -300,88 +419,7 @@ def plot_time_series(images, title: str = "", n_col: int = 5, n_row: int = 5,
     return axs
 
 
-def plot_gallery_graph(edge_values: Union[np.ndarray, torch.Tensor],
-                       edge_index: torch.Tensor, title: str,
-                       n_col: int, n_row: int, axs):
-    """
-    Plot graph visualizations for multiple basis vectors.
 
-    Each subplot shows a graph where edge thickness represents edge weight
-    from the corresponding basis vector.
-
-    Parameters
-    ----------
-    edge_values : np.ndarray or torch.Tensor
-        Edge weights matrix of shape (n_components, n_edges).
-        Each row contains edge weights for one basis.
-    edge_index : torch.LongTensor
-        Edge index tensor of shape (2, n_edges).
-        Each column is [source, target] for an edge.
-    title : str
-        Title prefix for each subplot
-    n_col : int
-        Number of columns in the subplot grid
-    n_row : int
-        Number of rows in the subplot grid
-    axs : matplotlib axes array
-        Pre-created axes array of shape (n_row, n_col)
-
-    Returns
-    -------
-    matplotlib axes array
-        Array of axes used for plotting
-    """
-    # Transpose edge_index from (2, n_edges) to (n_edges, 2)
-    edge_index_pairs = edge_index.transpose(0, 1)
-
-    # Compute node positions using spring layout on a temporary graph
-    nodes = set(int(u.item()) for u, v in edge_index_pairs) | set(int(v.item()) for u, v in edge_index_pairs)
-    G_temp = nx.Graph()
-    G_temp.add_nodes_from(nodes)
-    G_temp.add_edges_from([(int(u.item()), int(v.item())) for u, v in edge_index_pairs])
-    pos = nx.spring_layout(G_temp, seed=42)
-
-    # Number of basis vectors to plot
-    num_basis = edge_values.shape[0]
-    max_plots = n_row * n_col
-    n_plots = min(num_basis, max_plots)
-
-    # Initialize all subplot axes
-    for idx in range(max_plots):
-        r = idx // n_col
-        c = idx % n_col
-        ax = axs[r, c]
-        ax.clear()
-
-        if idx < n_plots:
-            # Plot the idx-th basis
-            weights = edge_values[idx]
-
-            # Draw edges with weight > 0
-            for j, (u, v) in enumerate(edge_index_pairs):
-                w = weights[j]
-                if isinstance(w, torch.Tensor):
-                    w = w.item()
-                if w <= 0:
-                    continue
-                ux, uy = pos[int(u.item())]
-                vx, vy = pos[int(v.item())]
-                ax.plot(
-                    [ux, vx],
-                    [uy, vy],
-                    color='tab:gray',
-                    linewidth=w * 5
-                )
-            ax.set_title(f"{title} {idx}", fontsize=8)
-            ax.set_xticks([])
-            ax.set_yticks([])
-        else:
-            # Empty subplot - hide frame
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.set_frame_on(False)
-
-    return axs
 
 
 def plot_PD_graph(graphs: List, edge_list: List[Tuple[int, int]],

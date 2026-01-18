@@ -70,7 +70,7 @@ def plot_gallery(images, title: str = "", n_col: int = 5, n_row: int = 5,
 
 def plot_persistence_diagrams(data, n_col: int = 5, n_row: int = 5, superlevel: bool = False, PHmode: str ="V",
                                M: int = 1, tau: int = 1, axs=None,
-                               center_func=None):
+                               center_func=None, use_embedding: bool = True):
     """
     Plot persistence diagrams for multiple time series.
 
@@ -104,7 +104,7 @@ def plot_persistence_diagrams(data, n_col: int = 5, n_row: int = 5, superlevel: 
         fig, axs = plt.subplots(n_row, n_col, figsize=(2. * n_col, 2.26 * n_row))
 
     for i, comp in enumerate(data[:n_col * n_row]):
-        if len(comp.shape) > 1:
+        if not use_embedding or len(comp.shape) > 1:
             sign = -1 if superlevel else 1
             if PHmode=="V":
                 cubical_complex = gudhi.CubicalComplex(vertices=sign*comp)

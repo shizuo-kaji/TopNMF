@@ -107,31 +107,78 @@ def target_diagram_loss(diagrams: List, PH_dims: List[int], target_diagrams: Opt
     return loss
 
 
-def weighted_persistence_loss(D: torch.Tensor, pow: int = 2, eps: float = 1e-4,
-                               remove_longest: bool = True) -> torch.Tensor:
+def weighted_persistence_loss(diagrams: List, PH_dims: List[int], target_diagrams: Optional[List] = None,
+                              device: str = 'cpu', pow: int = 2, eps: float = 1e-4,
+                              remove_longest: bool = True) -> torch.Tensor:
     """
-    Compute weighted persistence loss.
+    Compute weighted persistence loss for multiple dimensions.
 
-    L_top(v) = sum_i (w_i * |b_i - d_i|)^p
-
-    where weights are computed as (1 - |death|)^p, penalizing features
-    that persist close to the boundary.
+    This function matches the signature required by TopologicalNMF.fit.
+    It iterates over specified homology dimensions and computes the weighted
+    persistence loss for each.
 
     Parameters
     ----------
-    D : torch.Tensor
-        Persistence diagram of shape [N, 2], where each row is (birth, death)
+    diagrams : List
+        List of persistence diagrams from complex
+    PH_dims : List[int]
+        Homology dimensions to consider
+    target_diagrams : Optional[List]
+        Target diagrams (not used in this loss, but kept for signature compatibility)
+    device : str
+        Computing device
     pow : int
         The power p in the loss definition
     eps : float
-        Small constant to avoid division by zero when d_i is very small
+        Small constant
     remove_longest : bool
         Whether to remove the interval with longest persistence
 
     Returns
     -------
     torch.Tensor
-        The computed weighted topological loss
+        Total weighted topological loss
+    """
+    loss = torch.tensor(0., device=device)
+
+    for dim in PH_dims:
+        # Extract diagram tensor
+        if dim < len(diagrams):
+            # Handle both Diagram object and Tensor
+            if hasattr(diagrams[dim], 'diagram'):
+                D = diagrams[dim].diagram
+            else:
+                D = diagrams[dim]
+            
+            # Compute loss for this dimension
+            if D is not None and D.shape[0] > 0:
+                loss += _weighted_persistence_loss_single(D, pow=pow, eps=eps, remove_longest=remove_longest)
+
+    return loss
+
+
+def _weighted_persistence_loss_single(D: torch.Tensor, pow: int = 2, eps: float = 1e-4,
+                                      remove_longest: bool = True) -> torch.Tensor:
+    """
+    Compute weighted persistence loss for a single diagram.
+
+    L_top(v) = sum_i (w_i * |b_i - d_i|)^p
+
+    Parameters
+    ----------
+    D : torch.Tensor
+        Persistence diagram of shape [N, 2]
+    pow : int
+        Power p
+    eps : float
+        Small constant
+    remove_longest : bool
+        Whether to remove longest bar
+
+    Returns
+    -------
+    torch.Tensor
+        Loss value
     """
     births = D[:, 0]
     deaths = D[:, 1]
@@ -140,7 +187,7 @@ def weighted_persistence_loss(D: torch.Tensor, pow: int = 2, eps: float = 1e-4,
     # Optional: remove the longest bar
     if remove_longest and len(persistence) > 0:
         longest_idx = torch.argmax(persistence)
-        mask = torch.ones(len(D), dtype=torch.bool)
+        mask = torch.ones(len(D), dtype=torch.bool, device=D.device)
         mask[longest_idx] = False
         births = births[mask]
         deaths = deaths[mask]

@@ -545,7 +545,8 @@ class TopologicalNMF:
                             PHmode=PHmode,
                             M=M,
                             tau=tau if tau is not None else int(n_features / (2 * (M + 1))),
-                            axs=axs_P
+                            axs=axs_P,
+                            use_embedding=self.use_embedding
                         )
                     disp_P.update(fig_P)
 

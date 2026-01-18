@@ -134,9 +134,12 @@ def plot_persistence_diagrams(data, n_col: int = 5, n_row: int = 5, superlevel: 
 
 def plot_loss(losses, ax=None):
     """
-    Plot losses with dual y-axes.
-    Left y-axis (log): approx, lr
-    Right y-axis (linear): PH
+    Plot losses.
+    If PH loss has negative values:
+        - Left y-axis (log): approx, lr
+        - Right y-axis (linear): PH
+    If PH loss is all non-negative:
+        - Single y-axis (log): approx, lr, PH
     """
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -144,12 +147,6 @@ def plot_loss(losses, ax=None):
         fig = ax.figure
 
     ax.clear()
-    # Check if a second axis already exists from previous plot_loss calls
-    if len(fig.axes) > 1 and fig.axes[0] == ax:
-         ax2 = fig.axes[1]
-         ax2.clear()
-    else:
-         ax2 = ax.twinx()   # Create right y-axis
 
     # Fixed colors
     colors = {
@@ -158,31 +155,63 @@ def plot_loss(losses, ax=None):
         'PH':     'C0',  # Blue
     }
 
-    # ---------- Left Axis: approx, lr ----------
+    # Check PH values
+    ph_values = np.asarray(losses.get('PH', []))
+    has_negative_ph = np.any(ph_values < 0) if len(ph_values) > 0 else False
+
+    # Handle secondary axis
+    ax2 = None
+    if len(fig.axes) > 1 and fig.axes[0] == ax:
+         ax2 = fig.axes[1]
+
+    if has_negative_ph:
+        # Dual axis mode
+        if ax2 is None:
+            ax2 = ax.twinx()
+        else:
+            ax2.set_visible(True)
+            ax2.clear()
+            ax2.patch.set_visible(False) # Make sure it's transparent? twinx usually is.
+
+    elif ax2 is not None:
+        # Single axis mode: hide secondary axis if it exists
+        ax2.set_visible(False)
+        ax2.clear()
+
+    # ---------- Main Axis (Left) ----------
+    # Plot approx and lr
     for key in ['approx', 'lr']:
         if key in losses:
             y = np.asarray(losses[key])
             ax.plot(y, label=key, color=colors.get(key, 'k'))
 
+    # If single axis mode, plot PH here too
+    if not has_negative_ph and 'PH' in losses and len(ph_values) > 0:
+        ax.plot(ph_values, label='PH', color=colors['PH'])
+
     ax.set_xlabel("Epoch")
-    ax.set_ylabel("Loss (approx, lr)", size=12)
+    if not has_negative_ph and 'PH' in losses:
+        ax.set_ylabel("Loss (log scale)", size=12)
+    else:
+        ax.set_ylabel("Loss (approx, lr)", size=12)
+    
     ax.set_yscale('log')
+    ax.grid(True, alpha=0.3)
 
-    # ---------- Right Axis: PH (linear) ----------
-    if 'PH' in losses:
-        ph = np.asarray(losses['PH'])  # Revert to raw values
-        # Use plot on ax2
-        ax2.plot(ph, label='PH', color=colors['PH'])
+    # ---------- Secondary Axis (Right) - Only if negative PH ----------
+    if has_negative_ph and 'PH' in losses:
+        # Plot on ax2
+        ax2.plot(ph_values, label='PH', color=colors['PH'])
 
-        ax2.set_ylabel("PH Loss", size=12)
+        ax2.set_ylabel("PH Loss (linear)", size=12)
         
-        # Ensure label and ticks are on the right (fix for ax2.clear() resetting position)
+        # Ensure label and ticks are on the right
         ax2.yaxis.tick_right()
         ax2.yaxis.set_label_position("right")
 
         # Adjust y-limits for PH with padding
-        if len(ph) > 0:
-            ph_min, ph_max = float(np.min(ph)), float(np.max(ph))
+        if len(ph_values) > 0:
+            ph_min, ph_max = float(np.min(ph_values)), float(np.max(ph_values))
             if ph_min == ph_max:
                 pad = 0.1 * (abs(ph_min) + 1.0)
             else:
@@ -194,11 +223,11 @@ def plot_loss(losses, ax=None):
 
     # ---------- Legend ----------
     lines1, labels1 = ax.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
-
-    # ---------- Grid (Left axis) ----------
-    ax.grid(True, alpha=0.3)
+    if has_negative_ph and ax2 is not None:
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+    else:
+        ax.legend(lines1, labels1, loc='upper right')
 
     return ax
 

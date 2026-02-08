@@ -7,7 +7,7 @@ with sparsity constraints and optimization methods.
 
 import numpy as np
 import torch
-from typing import Optional
+from typing import Optional, Union
 
 
 def update_V(X: torch.Tensor, W: torch.Tensor, V: torch.Tensor,
@@ -182,7 +182,7 @@ def sparse_opt_hoyer(x: np.ndarray, L1: float, L2: float = 1,
     return np.maximum(s, 0)
 
 
-def sparsity_score(v: torch.Tensor) -> float:
+def sparsity_score(v: torch.Tensor) -> Union[float, torch.Tensor]:
     """
     Compute Hoyer sparsity score for a vector.
 
@@ -195,8 +195,9 @@ def sparsity_score(v: torch.Tensor) -> float:
 
     Returns
     -------
-    float
-        Sparsity score between 0 and 1
+    Union[float, torch.Tensor]
+        Sparsity score between 0 and 1.
+        Returns a tensor when `v` requires gradients.
     """
     n = len(v.ravel())
     l1_norm = v.abs().sum()
@@ -205,7 +206,10 @@ def sparsity_score(v: torch.Tensor) -> float:
     numerator = np.sqrt(n) - l1_norm / l2_norm
     denominator = np.sqrt(n) - 1
 
-    return float(numerator / denominator)
+    score = numerator / denominator
+    if score.requires_grad:
+        return score
+    return float(score.item())
 
 
 def svd_initialization(X: np.ndarray, n_components: int) -> tuple[np.ndarray, np.ndarray]:

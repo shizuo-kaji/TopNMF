@@ -59,7 +59,7 @@ addopts = "-v --tb=short"
 exclude = [
   "/old",
   "/notes",
-  "/example.ipynb",
+  "/notebook",
   "/.ipynb_checkpoints"
 ]
 

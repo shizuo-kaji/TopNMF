@@ -26,7 +26,13 @@ engineering, and visualization notebooks.
 │   ├── test_nmf_utils.py        # NMF utility tests
 │   ├── test_signal_generation.py
 │   └── test_topological_utils.py
-├── example.ipynb                # Hands-on walkthrough of the pipeline
+├── notebook/                    # Example and appendix notebooks
+│   ├── example.ipynb            # Hands-on walkthrough of the pipeline
+│   ├── Example 1.ipynb
+│   ├── Example 2.ipynb
+│   ├── Example 3.ipynb
+│   ├── Appendix 1.ipynb
+│   └── Appendix 2.ipynb
 ├── pyproject.toml               # Package configuration
 ├── AGENTS.md                    # AI agent development guide
 └── README.md                    # This document
@@ -75,7 +81,7 @@ V = model.get_components()
 losses = model.get_losses()
 ```
 
-See the [example notebook](example.ipynb) for a complete walkthrough.
+See the [example notebook](notebook/example.ipynb) for a complete walkthrough.
 
 ## Module Documentation
 

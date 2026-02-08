@@ -21,7 +21,13 @@ TopNMF/
 │   ├── signal_generation.py     # Synthetic signal generation
 │   └── visualization.py         # Plotting utilities
 ├── tests/                       # Pytest unit tests
-├── example.ipynb                # Usage walkthrough
+├── notebook/                    # Example and appendix notebooks
+│   ├── example.ipynb            # Usage walkthrough
+│   ├── Example 1.ipynb
+│   ├── Example 2.ipynb
+│   ├── Example 3.ipynb
+│   ├── Appendix 1.ipynb
+│   └── Appendix 2.ipynb
 ├── pyproject.toml               # Package configuration
 └── README.md                    # Documentation
 ```
@@ -106,7 +112,7 @@ def test_example(time_array, sample_signals):
 ### Running the Example
 
 ```bash
-jupyter notebook example.ipynb
+jupyter notebook notebook/example.ipynb
 ```
 
 ### Installing for Development

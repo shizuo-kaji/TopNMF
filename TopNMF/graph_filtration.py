@@ -1,120 +1,223 @@
+"""Graph-based persistent homology utilities."""
+
+from __future__ import annotations
+
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+
+import gudhi
 import torch
 from torch import nn
-from typing import List, Tuple, Union
-import gudhi
 from torch_topological.nn import PersistenceInformation
 
 
-__all__ = ['GraphFiltrationPH']
+Edge = Tuple[int, int]
+Simplex = Tuple[int, ...]
+
+__all__ = ["GraphFiltrationPH"]
+
 
 class GraphFiltrationPH(nn.Module):
-    def __init__(self, max_dim=1, superlevel: bool = False):
+    """Compute persistence diagrams from graph edge filtrations."""
+
+    def __init__(self, max_dim: int = 1, superlevel: bool = False):
         super().__init__()
+        if max_dim < 0:
+            raise ValueError(f"max_dim must be non-negative, got {max_dim}")
         self.max_dim = max_dim
         self.superlevel = superlevel
 
-    def forward(self,
-                all_edges: List[Tuple[int, int]],
-                edge_weight: Union[torch.Tensor, List[float]]
-               ) -> List["PersistenceInformation"]:
+    @staticmethod
+    def _canonical_edge(edge: Edge) -> Edge:
+        """Return a canonical undirected representation for an edge."""
+        u, v = edge
+        return (u, v) if u <= v else (v, u)
 
-        edge_weight = torch.as_tensor(edge_weight, dtype=torch.float32)
-        edge_weight.requires_grad_(True)
+    @staticmethod
+    def _build_edge_lookup(all_edges: Sequence[Edge]) -> Dict[Edge, int]:
+        """Map canonical edges to their first index in `all_edges`."""
+        edge_lookup: Dict[Edge, int] = {}
+        for idx, edge in enumerate(all_edges):
+            edge_lookup.setdefault(GraphFiltrationPH._canonical_edge(edge), idx)
+        return edge_lookup
 
-        edge_index = torch.tensor(all_edges, dtype=torch.long).T
-        num_edges = edge_index.shape[1]
+    def _prepare_inputs(
+        self,
+        all_edges: Sequence[Edge],
+        edge_weight: Union[torch.Tensor, List[float]],
+    ) -> Tuple[List[Edge], torch.Tensor, torch.Tensor, Dict[Edge, int]]:
+        """Normalize and validate graph inputs."""
+        if not all_edges:
+            raise ValueError("all_edges must contain at least one edge.")
+
+        normalized_edges = [(int(u), int(v)) for u, v in all_edges]
+        edge_weight_t = torch.as_tensor(edge_weight, dtype=torch.float32).reshape(-1)
+        if edge_weight_t.numel() != len(normalized_edges):
+            raise ValueError(
+                "edge_weight length must match all_edges length: "
+                f"{edge_weight_t.numel()} != {len(normalized_edges)}"
+            )
+        if not edge_weight_t.requires_grad:
+            edge_weight_t.requires_grad_(True)
+
+        edge_index = torch.tensor(normalized_edges, dtype=torch.long).T
         num_nodes = int(edge_index.max().item()) + 1
 
-        # 모든 vertex weight를 1.0으로 고정
-        f_vertices = torch.full((num_nodes,), -1.0, dtype=torch.float32, device=edge_weight.device)
-        f_vertices.requires_grad_(True)
+        vertex_values = torch.full(
+            (num_nodes,),
+            -1.0,
+            dtype=torch.float32,
+            device=edge_weight_t.device,
+        )
+        vertex_values.requires_grad_(True)
 
+        filtered_edge_values = -edge_weight_t if self.superlevel else edge_weight_t
+        edge_lookup = self._build_edge_lookup(normalized_edges)
+        return normalized_edges, filtered_edge_values, vertex_values, edge_lookup
 
-        edge_weight_filt = -edge_weight if self.superlevel else edge_weight
-
+    @staticmethod
+    def _build_simplex_tree(
+        all_edges: Sequence[Edge],
+        edge_values: torch.Tensor,
+        vertex_values: torch.Tensor,
+    ) -> gudhi.SimplexTree:
+        """Create and populate a simplex tree for graph filtration."""
         st = gudhi.SimplexTree()
-        simplex_to_index = {}
-        gid = 0
 
-        for i in range(num_nodes):
-            filtration_val = f_vertices[i].detach().cpu().item()
-            st.insert([i], filtration=filtration_val)
-            simplex_to_index[(i,)] = gid
-            gid += 1
+        for node_idx, node_value in enumerate(vertex_values):
+            st.insert([node_idx], filtration=float(node_value.detach().cpu().item()))
 
-        # for simplex, filtration_value in st.get_filtration():
-        #     print(f"Simplex: {simplex}, Filtration: {filtration_value}")
-
-        for i, (u, v) in enumerate(all_edges):
-            val = edge_weight_filt[i].detach().cpu().item()
-            st.insert([u, v], filtration=val)
-            simplex_to_index[tuple(sorted((u, v)))] = gid
-            gid += 1
+        for edge_idx, (u, v) in enumerate(all_edges):
+            st.insert([u, v], filtration=float(edge_values[edge_idx].detach().cpu().item()))
 
         st.make_filtration_non_decreasing()
+        st.compute_persistence(persistence_dim_max=True)
+        return st
 
-        all_filtration_values = torch.tensor(
-            [f for _, f in st.get_filtration()],
+    @staticmethod
+    def _max_filtration_value(st: gudhi.SimplexTree, device: torch.device) -> torch.Tensor:
+        """Get the maximum filtration value in the simplex tree as a tensor."""
+        filtration_values = [filtration for _, filtration in st.get_filtration()]
+        if not filtration_values:
+            return torch.tensor(0.0, dtype=torch.float32, device=device)
+
+        return torch.tensor(filtration_values, dtype=torch.float32, device=device).max()
+
+    def _birth_value(
+        self,
+        simplex: Simplex,
+        st: gudhi.SimplexTree,
+        edge_lookup: Dict[Edge, int],
+        edge_values: torch.Tensor,
+        vertex_values: torch.Tensor,
+    ) -> torch.Tensor:
+        """Resolve birth value for a creator simplex."""
+        if len(simplex) == 1:
+            return vertex_values[simplex[0]]
+        if len(simplex) == 2:
+            edge_idx = edge_lookup.get(self._canonical_edge((simplex[0], simplex[1])))
+            if edge_idx is None:
+                raise ValueError(f"Creator edge {simplex} was not found in all_edges.")
+            return edge_values[edge_idx]
+
+        return torch.tensor(
+            st.filtration(list(simplex)),
             dtype=torch.float32,
-            device=f_vertices.device
+            device=vertex_values.device,
         )
 
-        st.compute_persistence(persistence_dim_max=True)
+    def _death_value(
+        self,
+        simplex: Simplex,
+        edge_lookup: Dict[Edge, int],
+        edge_values: torch.Tensor,
+        vertex_values: torch.Tensor,
+        max_filtration: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Optional[Simplex]]:
+        """Resolve death value and death simplex metadata."""
+        if simplex and len(simplex) == 1:
+            return vertex_values[simplex[0]], simplex
 
-        # for simplex, filtration_value in st.get_filtration():
-        #     print(f"Simplex: {simplex}, Filtration: {filtration_value}")
+        if simplex and len(simplex) == 2:
+            edge_idx = edge_lookup.get(self._canonical_edge((simplex[0], simplex[1])))
+            if edge_idx is None:
+                return max_filtration, simplex
+            return edge_values[edge_idx], simplex
 
+        return max_filtration, None
 
-        results = []
+    def _build_persistence_info_for_dim(
+        self,
+        dim: int,
+        st: gudhi.SimplexTree,
+        edge_lookup: Dict[Edge, int],
+        edge_values: torch.Tensor,
+        vertex_values: torch.Tensor,
+        max_filtration: torch.Tensor,
+    ) -> PersistenceInformation:
+        """Collect persistence pairings and diagram entries for one dimension."""
+        diagram_entries: List[torch.Tensor] = []
+        pairing_entries: List[List[Optional[Simplex]]] = []
 
-        for dim in [0, 1]:
-            diagram_entries = []
-            pairing_entries = []
+        for creator_simplex_raw, destroyer_simplex_raw in st.persistence_pairs():
+            creator_simplex: Simplex = tuple(creator_simplex_raw)
+            destroyer_simplex: Simplex = tuple(destroyer_simplex_raw)
+            feature_dim = len(creator_simplex) - 1
+            if feature_dim != dim:
+                continue
 
-            for s1, s2 in st.persistence_pairs():
-                # print(s1,s2)
-                dim_s1 = len(s1) - 1 if s1 else -1
-                dim_s2 = len(s2) - 1 if s2 else -1
-                # feature_dim = max(dim_s1, dim_s2)
-                feature_dim = len(s1) - 1
+            birth = self._birth_value(
+                simplex=creator_simplex,
+                st=st,
+                edge_lookup=edge_lookup,
+                edge_values=edge_values,
+                vertex_values=vertex_values,
+            )
+            death, death_simplex = self._death_value(
+                simplex=destroyer_simplex,
+                edge_lookup=edge_lookup,
+                edge_values=edge_values,
+                vertex_values=vertex_values,
+                max_filtration=max_filtration,
+            )
 
-                if feature_dim != dim:
-                    continue
+            diagram_entries.append(torch.stack([birth, death]))
+            pairing_entries.append([creator_simplex, death_simplex])
 
-                # === birth filtration ===
-                if len(s1) == 1:
-                    b = f_vertices[s1[0]]
-                elif len(s1) == 2:
-                    idx = all_edges.index(tuple(sorted(s1)))
-                    b = edge_weight_filt[idx]
-                else:
-                    b = torch.tensor(st.filtration(s1), device=f_vertices.device)
+        if diagram_entries:
+            diagram = torch.stack(diagram_entries, dim=0)
+        else:
+            diagram = torch.zeros((0, 2), dtype=torch.float32, device=vertex_values.device)
 
-                # === death filtration ===
-                if s2 and len(s2) == 1:
-                    d = f_vertices[s2[0]]
-                    d_simplex = tuple(s2)
-                elif s2 and len(s2) == 2:
-                    try:
-                        idx = all_edges.index(tuple(sorted(s2)))
-                        d = edge_weight_filt[idx]
-                    except ValueError:
-                        d = all_filtration_values.max()
-                    d_simplex = tuple(s2)
-                else:
-                    d = all_filtration_values.max()
-                    d_simplex = None
+        return PersistenceInformation(pairing=pairing_entries, diagram=diagram, dimension=dim)
 
-                diagram_entries.append([b, d])
-                pairing_entries.append([tuple(s1), d_simplex])
+    def forward(
+        self,
+        all_edges: List[Tuple[int, int]],
+        edge_weight: Union[torch.Tensor, List[float]],
+    ) -> List[PersistenceInformation]:
+        """Compute persistence information for graph edge filtrations."""
+        (
+            normalized_edges,
+            edge_values,
+            vertex_values,
+            edge_lookup,
+        ) = self._prepare_inputs(all_edges=all_edges, edge_weight=edge_weight)
 
-            if diagram_entries:
-                diagram = torch.stack([torch.stack(p) for p in diagram_entries])
-                pairing = pairing_entries
-            else:
-                diagram = torch.zeros((0, 2), dtype=torch.float32, device=f_vertices.device)
-                pairing = []
+        st = self._build_simplex_tree(
+            all_edges=normalized_edges,
+            edge_values=edge_values,
+            vertex_values=vertex_values,
+        )
+        max_filtration = self._max_filtration_value(st, device=vertex_values.device)
 
-            results.append(PersistenceInformation(pairing=pairing, diagram=diagram, dimension=dim))
-
-        return results
+        return [
+            self._build_persistence_info_for_dim(
+                dim=dim,
+                st=st,
+                edge_lookup=edge_lookup,
+                edge_values=edge_values,
+                vertex_values=vertex_values,
+                max_filtration=max_filtration,
+            )
+            for dim in range(self.max_dim + 1)
+        ]

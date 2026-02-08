@@ -194,7 +194,7 @@ def plot_loss(losses, ax=None):
         ax.set_ylabel("Loss (log scale)", size=12)
     else:
         ax.set_ylabel("Loss (approx, lr)", size=12)
-    
+
     ax.set_yscale('log')
     ax.grid(True, alpha=0.3)
 
@@ -204,7 +204,7 @@ def plot_loss(losses, ax=None):
         ax2.plot(ph_values, label='PH', color=colors['PH'])
 
         ax2.set_ylabel("PH Loss (linear)", size=12)
-        
+
         # Ensure label and ticks are on the right
         ax2.yaxis.tick_right()
         ax2.yaxis.set_label_position("right")
@@ -232,13 +232,35 @@ def plot_loss(losses, ax=None):
     return ax
 
 def plot_gallery_graph(edge_values: Union[np.ndarray, torch.Tensor],
-                       edge_index: torch.Tensor, title: str,
-                       n_col: int, n_row: int, axs, pos=None):
+                        edge_index: torch.Tensor, title: str,
+                        n_col: int = 3, n_row: int = None, axs=None, pos=None,
+                        threshold: float = 0.1, use_labels: bool = False):
     """
     Plot graph visualizations for multiple basis vectors.
+
+    Parameters
+    ----------
+    edge_values : np.ndarray or torch.Tensor
+        Edge weight matrix of shape (n_basis, n_edges)
+    edge_index : torch.Tensor
+        Edge indices of shape (2, n_edges)
+    title : str
+        Title prefix for subplots
+    n_col : int, optional
+        Number of columns in grid
+    n_row : int, optional
+        Number of rows in grid
+    axs : matplotlib axes array, optional
+        Pre-existing axes to plot on
+    pos : dict, optional
+        Node positions {node_id: (x, y)}
+    threshold : float, optional
+        Minimum edge weight to display
+    use_labels : bool, optional
+        Whether to draw node labels
     """
-    # Transpose edge_index from (2, n_edges) to (n_edges, 2)
-    edge_index_pairs = edge_index.transpose(0, 1)
+    edge_index_pairs = edge_index.transpose(0, 1) if edge_index.dim() == 2 else edge_index
+    num_basis = edge_values.shape[0]
 
     # Compute node positions if not provided
     if pos is None:
@@ -246,53 +268,68 @@ def plot_gallery_graph(edge_values: Union[np.ndarray, torch.Tensor],
         G_temp = nx.Graph()
         G_temp.add_nodes_from(nodes)
         G_temp.add_edges_from([(int(u.item()), int(v.item())) for u, v in edge_index_pairs])
-        pos = nx.spring_layout(G_temp, seed=42) # Seed for reproducibility
+        pos = nx.spring_layout(G_temp, seed=42)
 
-    # Number of basis vectors to plot
-    num_basis = edge_values.shape[0]
-    max_plots = n_row * n_col
-    n_plots = min(num_basis, max_plots)
+    # Determine grid dimensions
+    if n_row is None:
+        n_row = int(np.ceil(num_basis / n_col))
 
-    # Initialize all subplot axes
-    for idx in range(max_plots):
-        if n_row > 1:
-            ax = axs[idx // n_col, idx % n_col]
-        else:
-            ax = axs[idx % n_col]
-            
+    # Create figure if axes not provided
+    if axs is None:
+        fig, axs = plt.subplots(n_row, n_col, figsize=(6. * n_col, 5. * n_row))
+    axs = np.atleast_2d(axs)
+
+    # Compute global limits for consistent visualization
+    all_x = [p[0] for p in pos.values()]
+    all_y = [p[1] for p in pos.values()]
+    global_xlim = (min(all_x) - 0.5, max(all_x) + 0.5) if all_x else (-1, 1)
+    global_ylim = (min(all_y) - 0.5, max(all_y) + 0.5) if all_y else (-1, 1)
+
+    # Plot each basis vector
+    for idx in range(n_row * n_col):
+        ax = axs[idx // n_col, idx % n_col]
         ax.clear()
 
-        if idx < n_plots:
-            # Plot the idx-th basis
-            weights = edge_values[idx]
-
-            # Draw edges with weight > 0
-            for j, (u, v) in enumerate(edge_index_pairs):
-                w = weights[j]
-                if isinstance(w, torch.Tensor):
-                    w = w.item()
-                if w <= 0:
-                    continue
-                ux, uy = pos[int(u.item())]
-                vx, vy = pos[int(v.item())]
-                ax.plot(
-                    [ux, vx],
-                    [uy, vy],
-                    color='tab:gray',
-                    linewidth=w * 5
-                )
-            # Draw nodes
-            for node, (x, y) in pos.items():
-                 ax.plot(x, y, 'o', color='black', markersize=2)
-                 
-            ax.set_title(f"{title} {idx}", fontsize=8)
-            ax.set_xticks([])
-            ax.set_yticks([])
-        else:
+        if idx >= num_basis:
             ax.axis('off')
+            continue
+
+        weights = edge_values[idx]
+        edge_weights = {}
+
+        # Aggregate edge weights
+        for j, (u, v) in enumerate(edge_index_pairs):
+            w = weights[j].item() if isinstance(weights[j], torch.Tensor) else float(weights[j])
+            if w > threshold:
+                e = tuple(sorted([int(u.item()), int(v.item())]))
+                edge_weights[e] = edge_weights.get(e, 0.0) + w
+
+        # Create and draw graph
+        G = nx.Graph()
+        G.add_edges_from(edge_weights.keys())
+
+        nx.draw_networkx_nodes(G, pos, node_color='lightcoral', node_size=600,
+                                edgecolors='black', ax=ax)
+
+        if use_labels:
+            nx.draw_networkx_labels(G, pos, font_size=10, font_color='black', ax=ax)
+
+        edge_widths = [1.5 + edge_weights[tuple(sorted([u, v]))] * 2 for u, v in G.edges()]
+        nx.draw_networkx_edges(G, pos, edge_color='black', width=edge_widths, ax=ax)
+
+        # Optional edge labels
+        edge_labels = {(u, v): f"{edge_weights[tuple(sorted([u, v]))]:.2f}" for u, v in G.edges()}
+        if edge_labels:
+            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8,
+                                        bbox=dict(facecolor='white', edgecolor='none',
+                                                    alpha=0.8, pad=0.3), ax=ax)
+
+        ax.set_title(f"{title} {idx + 1}", fontsize=12)
+        ax.set_xlim(global_xlim)
+        ax.set_ylim(global_ylim)
+        ax.axis('off')
 
     return axs
-
 
 def plot_time_series_comparison(original, reconstructed, basis_vectors,
                                  time_axis=None, save_path: Optional[str] = None):

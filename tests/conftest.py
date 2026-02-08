@@ -68,6 +68,14 @@ def topological_nmf_module() -> ModuleType:
     return import_module("TopNMF.topological_nmf")
 
 
+@pytest.fixture(scope="module")
+def graph_filtration_module() -> ModuleType:
+    pytest.importorskip("torch")
+    pytest.importorskip("gudhi")
+    pytest.importorskip("torch_topological")
+    return import_module("TopNMF.graph_filtration")
+
+
 @pytest.fixture
 def time_array(np):
     return np.linspace(0.0, 2.0 * np.pi, 64)

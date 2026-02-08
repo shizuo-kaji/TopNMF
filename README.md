@@ -1,11 +1,8 @@
 # TopNMF: Topological Non-negative Matrix Factorization
 
-TopNMF is a NumPy/PyTorch implementation of Non-negative Matrix Factorization (NMF) with
-topological regularisation. The core `TopologicalNMF` class augments standard NMF loss
-with persistent-homology penalties (Vietoris–Rips or Cubical complexes) so that the
-learned basis captures periodic, structured, or sparse behaviours in time-series or image
-signals. This repository also ships utilities for signal generation, topological feature
-engineering, and visualization notebooks.
+TopNMF is a NumPy/PyTorch implementation of Non-negative Matrix Factorization (NMF) with topological regularization. The core `TopologicalNMF` class augments standard NMF loss with persistent homology penalties to capture periodic, structured, or sparse behaviors in time-series and image signals.
+
+Written by Shizuo Kaji and Keunsu Kim
 
 ## Repository Layout
 
@@ -22,10 +19,6 @@ engineering, and visualization notebooks.
 │   ├── signal_generation.py     # Synthetic datasets for demos/tests
 │   └── visualization.py         # Plotting utilities for NMF + TDA outputs
 ├── tests/                       # Pytest unit tests
-│   ├── conftest.py              # Shared fixtures
-│   ├── test_nmf_utils.py        # NMF utility tests
-│   ├── test_signal_generation.py
-│   └── test_topological_utils.py
 ├── notebook/                    # Example and appendix notebooks
 │   ├── example.ipynb            # Hands-on walkthrough of the pipeline
 │   ├── Example 1.ipynb
@@ -47,18 +40,6 @@ pip install -e .
 # Or install with dev dependencies for testing
 pip install -e ".[dev]"
 ```
-
-### Dependencies
-
-- numpy>=1.23
-- scipy>=1.9
-- torch>=2.0
-- matplotlib>=3.6
-- tqdm>=4.64
-- scikit-learn>=1.1
-- ripser>=0.6
-- gudhi>=3.8
-- torch-topological>=0.1.7
 
 ## Quick Start
 
@@ -200,24 +181,6 @@ Synthetic signal generation for testing.
 - `target_diagrams`: Target persistence diagrams
 - `target_periodicity`: Target periodicity scores
 
-## Testing
-
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=TopNMF
-
-# Run specific test file
-pytest tests/test_nmf_utils.py -v
-```
-
 ## License
 
 MIT
-
----
-
-**Version**: 1.0.0
-**Last Updated**: 2025-01-10

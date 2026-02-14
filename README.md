@@ -62,7 +62,7 @@ V = model.get_components()
 losses = model.get_losses()
 ```
 
-See the [example notebook](notebook/example.ipynb) for a complete walkthrough.
+See the [example notebooks](notebook/) for a complete walkthrough.
 
 ## Module Documentation
 

@@ -9,6 +9,44 @@ import torch
 from typing import List, Optional, Dict
 
 
+def total_variation(v: torch.Tensor) -> torch.Tensor:
+    """
+    Compute squared total variation for 1D or 2D tensors.
+
+    For a 1D tensor, this is:
+        sum_i (v[i+1] - v[i])^2
+
+    For a 2D tensor, this is the sum of squared finite differences
+    along both axes:
+        sum_{i,j} (v[i+1, j] - v[i, j])^2 +
+        sum_{i,j} (v[i, j+1] - v[i, j])^2
+
+    Parameters
+    ----------
+    v : torch.Tensor
+        Input tensor with 1 or 2 dimensions.
+
+    Returns
+    -------
+    torch.Tensor
+        Squared total variation as a scalar tensor.
+
+    Raises
+    ------
+    ValueError
+        If `v` is not 1D or 2D.
+    """
+    if v.ndim == 1:
+        return torch.diff(v).pow(2).sum()
+
+    if v.ndim == 2:
+        tv_rows = torch.diff(v, dim=0).pow(2).sum()
+        tv_cols = torch.diff(v, dim=1).pow(2).sum()
+        return tv_rows.sqrt() + tv_cols.sqrt()
+
+    raise ValueError(f"total_variation expects a 1D or 2D tensor, got {v.ndim}D")
+
+
 def ph_sparsity_loss(diagrams: List, PH_dims: List[int], target_diagrams: Optional[List] = None,
                      device: str = 'cpu') -> torch.Tensor:
     """
@@ -107,13 +145,14 @@ def target_diagram_loss(diagrams: List, PH_dims: List[int], target_diagrams: Opt
     return loss
 
 
-def weighted_persistence_loss(diagrams: List, PH_dims: List[int], target_diagrams: Optional[List] = None,
+def weighted_persistence_loss(diagrams: List, PH_dims: List[int],
+                              target_diagrams: Optional[List] = None,
                               device: str = 'cpu', pow: int = 2, eps: float = 1e-4,
                               remove_longest: bool = True) -> torch.Tensor:
     """
     Compute weighted persistence loss for multiple dimensions.
+    L_top(v) = sum_i (w_i * |b_i - d_i|)^p
 
-    This function matches the signature required by TopologicalNMF.fit.
     It iterates over specified homology dimensions and computes the weighted
     persistence loss for each.
 
@@ -149,54 +188,26 @@ def weighted_persistence_loss(diagrams: List, PH_dims: List[int], target_diagram
                 D = diagrams[dim].diagram
             else:
                 D = diagrams[dim]
-            
+
             # Compute loss for this dimension
             if D is not None and D.shape[0] > 0:
-                loss += _weighted_persistence_loss_single(D, pow=pow, eps=eps, remove_longest=remove_longest)
+                births = D[:, 0]
+                deaths = D[:, 1]
+                persistence = (deaths - births).abs()
 
-    return loss
+                # Optional: remove the longest bar
+                if remove_longest and len(persistence) > 0:
+                    longest_idx = torch.argmax(persistence)
+                    mask = torch.ones(len(D), dtype=torch.bool, device=D.device)
+                    mask[longest_idx] = False
+                    births = births[mask]
+                    deaths = deaths[mask]
+                    persistence = persistence[mask]
 
-
-def _weighted_persistence_loss_single(D: torch.Tensor, pow: int = 2, eps: float = 1e-4,
-                                      remove_longest: bool = True) -> torch.Tensor:
-    """
-    Compute weighted persistence loss for a single diagram.
-
-    L_top(v) = sum_i (w_i * |b_i - d_i|)^p
-
-    Parameters
-    ----------
-    D : torch.Tensor
-        Persistence diagram of shape [N, 2]
-    pow : int
-        Power p
-    eps : float
-        Small constant
-    remove_longest : bool
-        Whether to remove longest bar
-
-    Returns
-    -------
-    torch.Tensor
-        Loss value
-    """
-    births = D[:, 0]
-    deaths = D[:, 1]
-    persistence = (deaths - births).abs()
-
-    # Optional: remove the longest bar
-    if remove_longest and len(persistence) > 0:
-        longest_idx = torch.argmax(persistence)
-        mask = torch.ones(len(D), dtype=torch.bool, device=D.device)
-        mask[longest_idx] = False
-        births = births[mask]
-        deaths = deaths[mask]
-        persistence = persistence[mask]
-
-    # Compute the weighted loss
-    weights = (1.0 - torch.abs(deaths)).pow(pow)
-    weighted = (weights * persistence).pow(pow)
-    loss = weighted.sum()
+                # Compute the weighted loss
+                weights = (1.0 - torch.abs(deaths)).clamp(min=0)
+                weighted = (weights * persistence).pow(pow)
+                loss += weighted.sum()
 
     return loss
 
@@ -263,15 +274,15 @@ def sparsity_loss(v: torch.Tensor, target_sparsity: Optional[float] = None) -> t
 
 
 
-def clique_deviation_loss(diags: List, PH_dims: List[int], target_PH: List, device: str, 
+def clique_deviation_loss(diags: List, PH_dims: List[int], target_PH: List, device: str,
                           alpha: float = 1.0,
                           remove_longest: Optional[Dict[int, bool]] = None) -> torch.Tensor:
     """
     Clique Deviation Loss.
-    
+
     Computes topological loss by subtracting persistence loss from the total loss.
     Designed to maximize deviation from target diagrams or persistence features.
-    
+
     Parameters
     ----------
     diags : List
@@ -287,7 +298,7 @@ def clique_deviation_loss(diags: List, PH_dims: List[int], target_PH: List, devi
     remove_longest : Dict[int, bool], optional
         Dictionary specifying whether to remove longest persistence for each dimension.
         Key is dimension, Value is bool. Default is False for all.
-        
+
     Returns
     -------
     torch.Tensor
@@ -295,7 +306,7 @@ def clique_deviation_loss(diags: List, PH_dims: List[int], target_PH: List, devi
     """
     # Initialize loss_PH
     loss_PH = torch.tensor(0., device=device)
-    
+
     if remove_longest is None:
         remove_longest = {}
 
@@ -306,6 +317,6 @@ def clique_deviation_loss(diags: List, PH_dims: List[int], target_PH: List, devi
             loss_PH -= term
         else:
             loss_PH -= alpha * term
-            
+
 
     return loss_PH

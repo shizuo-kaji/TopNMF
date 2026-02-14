@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 import gudhi
 import torch
 from torch import nn
-from torch_topological.nn import PersistenceInformation
 
 
 Edge = Tuple[int, int]
 Simplex = Tuple[int, ...]
 
-__all__ = ["GraphFiltrationPH"]
+__all__ = ["GraphFiltrationPH", "PersistenceInformation"]
+
+
+class PersistenceInformation(NamedTuple):
+    """Minimal persistence container for diagram + pairing metadata."""
+
+    pairing: List[List[Optional[Simplex]]]
+    diagram: torch.Tensor
+    dimension: int
 
 
 class GraphFiltrationPH(nn.Module):

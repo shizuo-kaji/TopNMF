@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+import os
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 
 def test_graph_filtration_rejects_negative_max_dim(graph_filtration_module):

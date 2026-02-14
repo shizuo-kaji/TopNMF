@@ -13,12 +13,15 @@ import numpy as np
 import torch
 import torch.optim as optim
 from sklearn.decomposition._nmf import _initialize_nmf
-from torch_topological.nn import VietorisRipsComplex
 from tqdm.auto import tqdm
 
 from .losses import ph_sparsity_loss
 from .nmf_utils import sparsity_score, total_variation, update_V
-from .topological_utils import TimeDelayEmbeddingTorch, center_point_cloud_torch
+from .topological_utils import (
+    TimeDelayEmbeddingTorch,
+    center_point_cloud_torch,
+    GudhiVietorisRipsComplex,
+)
 from .visualization import (
     plot_PD_graph,
     plot_gallery,
@@ -94,8 +97,8 @@ class TopologicalNMF:
         random_state : int, optional
             Random seed for reproducibility
         complex : object, optional
-            Persistent homology complex (e.g., VietorisRipsComplex, CubicalComplex).
-            If None, uses VietorisRipsComplex with time delay embedding.
+            Persistent homology complex (e.g., GudhiVietorisRipsComplex, CubicalComplex).
+            If None, uses GudhiVietorisRipsComplex with time delay embedding.
         ph_loss_fn : Callable, optional
             Loss function for persistent homology. Should accept (diagrams, PH_dims, target_diagrams, device).
             If None, uses ph_sparsity_loss.
@@ -216,7 +219,7 @@ class TopologicalNMF:
     def _resolve_complex(self) -> Callable:
         if self.complex is not None:
             return self.complex
-        return VietorisRipsComplex(dim=1, p=2)
+        return GudhiVietorisRipsComplex(dim=1, p=2)
 
     def _run_multiplicative_updates(
         self,
@@ -292,7 +295,12 @@ class TopologicalNMF:
         target_value: float,
         device: str,
     ) -> torch.Tensor:
-        persistence_diagram = torch.cat([diagrams[dim].diagram for dim in PH_dims])
+        persistence_diagram = torch.cat(
+            [
+                diagrams[dim].diagram if hasattr(diagrams[dim], "diagram") else diagrams[dim]
+                for dim in PH_dims
+            ]
+        )
         persistence = torch.diff(persistence_diagram, dim=1).reshape(-1)
         if len(persistence) > 0:
             periodicity_score = torch.max(persistence) / np.sqrt(3)

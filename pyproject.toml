@@ -38,9 +38,9 @@ dependencies = [
   "matplotlib>=3.6",
   "tqdm>=4.64",
   "scikit-learn>=1.1",
+  "cripser>=0.0.24",
   "ripser>=0.6",
   "gudhi>=3.8",
-  "torch-topological>=0.1.7"
 ]
 
 [project.optional-dependencies]

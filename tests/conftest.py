@@ -62,7 +62,6 @@ def topological_nmf_module() -> ModuleType:
     pytest.importorskip("sklearn")
     pytest.importorskip("matplotlib")
     pytest.importorskip("tqdm")
-    pytest.importorskip("torch_topological")
     pytest.importorskip("gudhi")
     pytest.importorskip("ripser")
     return import_module("TopNMF.topological_nmf")
@@ -72,7 +71,6 @@ def topological_nmf_module() -> ModuleType:
 def graph_filtration_module() -> ModuleType:
     pytest.importorskip("torch")
     pytest.importorskip("gudhi")
-    pytest.importorskip("torch_topological")
     return import_module("TopNMF.graph_filtration")
 
 

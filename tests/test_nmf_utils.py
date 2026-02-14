@@ -58,6 +58,18 @@ def test_total_variation_matches_manual_computation(nmf_utils_module, torch):
     assert float(total_var) == pytest.approx(13.0)
 
 
+def test_total_variation_2d_matches_manual_computation(nmf_utils_module, torch):
+    values = torch.tensor(
+        [
+            [1.0, 2.0, 4.0],
+            [0.0, 3.0, 5.0],
+        ],
+        dtype=torch.float64,
+    )
+    total_var = nmf_utils_module.total_variation(values)
+    assert float(total_var) == pytest.approx(21.0)
+
+
 def test_update_v_returns_finite_nonnegative_tensor(nmf_utils_module, torch):
     torch.manual_seed(0)
     x_matrix = torch.rand(6, 5, dtype=torch.float64)

@@ -182,6 +182,36 @@ def sparse_opt_hoyer(x: np.ndarray, L1: float, L2: float = 1,
     return np.maximum(s, 0)
 
 
+def total_variation(v: torch.Tensor) -> torch.Tensor:
+    """
+    Compute squared total variation for 1D or 2D tensors.
+
+    Parameters
+    ----------
+    v : torch.Tensor
+        Input tensor with 1 or 2 dimensions.
+
+    Returns
+    -------
+    torch.Tensor
+        Squared total variation as a scalar tensor.
+
+    Raises
+    ------
+    ValueError
+        If `v` is not 1D or 2D.
+    """
+    if v.ndim == 1:
+        return torch.diff(v).pow(2).sum()
+
+    if v.ndim == 2:
+        tv_rows = torch.diff(v, dim=0).pow(2).sum()
+        tv_cols = torch.diff(v, dim=1).pow(2).sum()
+        return tv_rows + tv_cols
+
+    raise ValueError(f"total_variation expects a 1D or 2D tensor, got {v.ndim}D")
+
+
 def sparsity_score(v: torch.Tensor) -> Union[float, torch.Tensor]:
     """
     Compute Hoyer sparsity score for a vector.
@@ -241,22 +271,3 @@ def svd_initialization(X: np.ndarray, n_components: int) -> tuple[np.ndarray, np
     V = np.abs(np.sqrt(S) @ VT)
 
     return W, V
-
-
-def total_variation(v: torch.Tensor) -> torch.Tensor:
-    """
-    Compute total variation (TV) of a vector.
-
-    TV measures the sum of squared differences between consecutive elements.
-
-    Parameters
-    ----------
-    v : torch.Tensor
-        Input vector
-
-    Returns
-    -------
-    torch.Tensor
-        Total variation value
-    """
-    return ((v[1:] - v[:-1])**2).sum()

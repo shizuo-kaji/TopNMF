@@ -12,6 +12,7 @@ from .losses import (
     weighted_persistence_loss,
     reconstruction_loss,
     sparsity_loss,
+    total_variation,
     clique_deviation_loss,
 )
 from .nmf_utils import (
@@ -20,12 +21,12 @@ from .nmf_utils import (
     sparse_opt_hoyer,
     sparsity_score,
     svd_initialization,
-    total_variation
 )
 from .topological_utils import (
     center_point_cloud,
     center_point_cloud_torch,
     TimeDelayEmbeddingTorch,
+    GudhiVietorisRipsComplex,
     compute_periodicity_score,
     compute_persistence_diagram
 )
@@ -75,6 +76,7 @@ __all__ = [
     'center_point_cloud',
     'center_point_cloud_torch',
     'TimeDelayEmbeddingTorch',
+    'GudhiVietorisRipsComplex',
     'compute_periodicity_score',
     'compute_persistence_diagram',
     'plot_gallery',

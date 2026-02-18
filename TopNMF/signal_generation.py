@@ -6,7 +6,6 @@ with various characteristics for testing and experimentation.
 """
 
 import numpy as np
-from scipy import signal as scipy_signal
 from typing import Dict, Optional
 from scipy import signal
 import random

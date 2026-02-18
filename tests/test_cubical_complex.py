@@ -1,19 +1,21 @@
-from __future__ import annotations
+"""Tests for the cubical complex persistence module."""
 
-from importlib import import_module
+from __future__ import annotations
 
 import pytest
 
 
-def _load_cubical_complex_module():
+def _load_module():
     pytest.importorskip("numpy")
     pytest.importorskip("torch")
     pytest.importorskip("cripser")
-    return import_module("TopNMF.cubical_complex")
+    from TopNMF.persistence import cubical as mod
+    from TopNMF.persistence import PersistenceInfo
+    return mod, PersistenceInfo
 
 
 def test_cubical_complex_vertices_mode_shapes():
-    module = _load_cubical_complex_module()
+    mod, PersistenceInfo = _load_module()
     torch = pytest.importorskip("torch")
 
     x = torch.tensor(
@@ -25,14 +27,14 @@ def test_cubical_complex_vertices_mode_shapes():
         dtype=torch.float64,
     )
 
-    cc = module.CubicalComplex(mode="V")
+    cc = mod.CubicalComplex(mode="V")
     persistence = cc(x)
 
     assert isinstance(persistence, list)
     assert len(persistence) == 2
 
     for expected_dim, info in enumerate(persistence):
-        assert isinstance(info, module.PersistenceInfo)
+        assert isinstance(info, PersistenceInfo)
         assert info.dimension == expected_dim
         assert info.diagram.ndim == 2
         assert info.diagram.shape[1] == 2
@@ -42,7 +44,7 @@ def test_cubical_complex_vertices_mode_shapes():
 
 
 def test_cubical_complex_t_mode_shapes():
-    module = _load_cubical_complex_module()
+    mod, _ = _load_module()
     torch = pytest.importorskip("torch")
 
     x = torch.tensor(
@@ -54,7 +56,7 @@ def test_cubical_complex_t_mode_shapes():
         dtype=torch.float64,
     )
 
-    cc = module.CubicalComplex(mode="T")
+    cc = mod.CubicalComplex(mode="T")
     persistence = cc(x)
 
     assert isinstance(persistence, list)
@@ -67,11 +69,11 @@ def test_cubical_complex_t_mode_shapes():
 
 
 def test_cubical_complex_batched_forward_structure():
-    module = _load_cubical_complex_module()
+    mod, _ = _load_module()
     torch = pytest.importorskip("torch")
 
     x = torch.rand(2, 3, 5, 5, dtype=torch.float64)
-    cc = module.CubicalComplex(mode="V")
+    cc = mod.CubicalComplex(mode="V")
     persistence = cc(x)
 
     assert len(persistence) == 2
@@ -80,7 +82,7 @@ def test_cubical_complex_batched_forward_structure():
 
 
 def test_cubical_complex_superlevel_diagram_values_use_original_tensor():
-    module = _load_cubical_complex_module()
+    mod, _ = _load_module()
     torch = pytest.importorskip("torch")
 
     x = torch.tensor(
@@ -92,7 +94,7 @@ def test_cubical_complex_superlevel_diagram_values_use_original_tensor():
         dtype=torch.float64,
     )
 
-    cc = module.CubicalComplex(mode="V", superlevel=True)
+    cc = mod.CubicalComplex(mode="V", superlevel=True)
     persistence = cc(x)
     x_min = float(x.min())
     x_max = float(x.max())

@@ -1,45 +1,52 @@
 """
 Topological NMF Package
 
-A refactored implementation of Non-negative Matrix Factorization with
-topological constraints using persistent homology.
+Non-negative Matrix Factorization with topological regularisation
+via persistent homology.
 """
 
-from .topological_nmf import TopologicalNMF
+from .model import TopologicalNMF
+
 from .losses import (
     ph_sparsity_loss,
     target_diagram_loss,
     weighted_persistence_loss,
-    reconstruction_loss,
-    sparsity_loss,
     total_variation,
     clique_deviation_loss,
 )
-from .nmf_utils import (
+
+from .optim import (
     update_V,
     sparse_opt,
     sparse_opt_hoyer,
+)
+
+from .utils import (
     sparsity_score,
     svd_initialization,
-)
-from .topological_utils import (
     center_point_cloud,
     center_point_cloud_torch,
-    TimeDelayEmbeddingTorch,
-    GudhiVietorisRipsComplex,
     compute_periodicity_score,
-    compute_persistence_diagram
+    compute_persistence_diagram,
 )
+
+from .persistence import PersistenceInfo
+from .persistence import CubicalComplex
+from .persistence import GudhiVietorisRipsComplex
+from .persistence import TimeDelayEmbeddingTorch
+from .persistence import GraphFiltrationPH
+
 from .visualization import (
+    FitMonitor,
     plot_gallery,
     plot_persistence_diagrams,
     plot_loss,
     plot_time_series_comparison,
     plot_fourier_spectrum,
-    plot_time_series,
     plot_gallery_graph,
     plot_PD_graph,
 )
+
 from .signal_generation import (
     create_ichimatsu_pattern,
     generate_signals,
@@ -49,44 +56,46 @@ from .signal_generation import (
     generate_noisy_signals,
     generate_step_signals,
     normalize_signals,
-    create_time_array
+    create_time_array,
 )
-
-from .graph_filtration import GraphFiltrationPH
-from .cubical_complex import CubicalComplex, PersistenceInfo
 
 __version__ = '1.0.0'
 __all__ = [
     # Main class
     'TopologicalNMF',
+    # Persistence
+    'PersistenceInfo',
+    'CubicalComplex',
+    'GudhiVietorisRipsComplex',
+    'TimeDelayEmbeddingTorch',
+    'GraphFiltrationPH',
     # Loss functions
     'ph_sparsity_loss',
     'target_diagram_loss',
     'weighted_persistence_loss',
-    'reconstruction_loss',
-    'sparsity_loss',
     'clique_deviation_loss',
-    # NMF utilities
+    'total_variation',
+    # Optimization
     'update_V',
     'sparse_opt',
     'sparse_opt_hoyer',
+    # Utilities
     'sparsity_score',
     'svd_initialization',
-    'total_variation',
     'center_point_cloud',
     'center_point_cloud_torch',
-    'TimeDelayEmbeddingTorch',
-    'GudhiVietorisRipsComplex',
     'compute_periodicity_score',
     'compute_persistence_diagram',
+    # Visualization
+    'FitMonitor',
     'plot_gallery',
     'plot_persistence_diagrams',
     'plot_loss',
     'plot_time_series_comparison',
     'plot_fourier_spectrum',
-    'plot_time_series',
     'plot_gallery_graph',
     'plot_PD_graph',
+    # Signal generation
     'create_ichimatsu_pattern',
     'generate_signals',
     'generate_mixed_periodic_nonperiodic',
@@ -96,7 +105,4 @@ __all__ = [
     'generate_step_signals',
     'normalize_signals',
     'create_time_array',
-    'GraphFiltrationPH',
-    'CubicalComplex',
-    'PersistenceInfo',
 ]

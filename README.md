@@ -1,6 +1,6 @@
 # TopNMF: Topological Non-negative Matrix Factorization
 
-TopNMF is a NumPy/PyTorch implementation of Non-negative Matrix Factorization (NMF) with topological regularization. The core `TopologicalNMF` class augments standard NMF loss with persistent homology penalties to capture periodic, structured, or sparse behaviors in time-series and image signals.
+TopNMF is a NumPy/PyTorch implementation of Non-negative Matrix Factorization (NMF) with topological regularisation. The core `TopologicalNMF` class augments standard NMF loss with persistent homology penalties to capture periodic, structured, or sparse behaviours in time-series, image, and graph data.
 
 Written by Shizuo Kaji and Keunsu Kim
 
@@ -8,27 +8,27 @@ Written by Shizuo Kaji and Keunsu Kim
 
 ```
 .
-├── TopNMF/                      # Installable Python package
-│   ├── __init__.py              # Re-exports public API (__version__ = 1.0.0)
-│   ├── topological_nmf.py       # TopologicalNMF class
-│   ├── losses.py                # PH loss functions (sparsity, target diagram, etc.)
-│   ├── nmf_utils.py             # Sparse NMF updates, SVD init, total variation
-│   ├── topological_utils.py     # Time-delay embedding + persistence helpers
-│   ├── cubical_complex.py       # CubicalComplex for image/grid data
-│   ├── graph_filtration.py      # GraphFiltrationPH for graph-based PH
-│   ├── signal_generation.py     # Synthetic datasets for demos/tests
-│   └── visualization.py         # Plotting utilities for NMF + TDA outputs
-├── tests/                       # Pytest unit tests
-├── notebook/                    # Example and appendix notebooks
-│   ├── example.ipynb            # Hands-on walkthrough of the pipeline
-│   ├── Example 1.ipynb
-│   ├── Example 2.ipynb
-│   ├── Example 3.ipynb
-│   ├── Appendix 1.ipynb
-│   └── Appendix 2.ipynb
-├── pyproject.toml               # Package configuration
-├── AGENTS.md                    # AI agent development guide
-└── README.md                    # This document
+├── TopNMF/                        # Installable Python package
+│   ├── __init__.py                # Re-exports public API (__version__ = 1.0.0)
+│   ├── model.py                   # TopologicalNMF class
+│   ├── losses.py                  # PH loss functions (sparsity, target diagram, etc.)
+│   ├── optim.py                   # Sparse NMF updates (update_V, sparse_opt, sparse_opt_hoyer)
+│   ├── utils.py                   # Sparsity score, SVD init, periodicity helpers
+│   ├── persistence/               # Persistence computation backends
+│   │   ├── __init__.py            # Unified PersistenceInfo type
+│   │   ├── cubical.py             # CubicalComplex (requires cripser)
+│   │   ├── rips.py                # GudhiVietorisRipsComplex + TimeDelayEmbeddingTorch
+│   │   └── graph.py               # GraphFiltrationPH for edge-weighted graphs
+│   ├── signal_generation.py       # Synthetic datasets for demos/tests
+│   └── visualization.py           # Plotting utilities + FitMonitor callback
+├── tests/                         # Pytest unit tests
+├── notebook/                      # Example notebooks
+│   ├── 1D Signal.ipynb            # Time-series decomposition (Rips + cubical)
+│   ├── 2D Image.ipynb             # Image decomposition (Hangul + ichimatsu)
+│   └── Edge-weighted Graph.ipynb  # Graph decomposition (overlapping cliques)
+├── pyproject.toml                 # Package configuration
+├── AGENTS.md                      # AI agent development guide
+└── README.md                      # This document
 ```
 
 ## Installation
@@ -41,11 +41,16 @@ pip install -e .
 pip install -e ".[dev]"
 ```
 
+### Optional dependencies
+
+- **cripser** -- required for `CubicalComplex` (image/grid persistence). Install separately; the rest of the package works without it.
+
 ## Quick Start
 
 ### Basic Usage
 
 ```python
+import numpy as np
 from TopNMF import TopologicalNMF, generate_signals, create_time_array
 
 # Generate synthetic signals
@@ -54,7 +59,7 @@ signals = generate_signals(t, kind="cosine")
 X = np.stack(list(signals.values()))
 
 # Fit TopologicalNMF
-model = TopologicalNMF(n_components=2)
+model = TopologicalNMF(n_components=2, use_embedding=True)
 model.fit(X, n_iterations=500, lambda_top=0.01)
 
 # Get results
@@ -62,11 +67,25 @@ V = model.get_components()
 losses = model.get_losses()
 ```
 
-See the [example notebooks](notebook/) for a complete walkthrough.
+### Live visualisation with FitMonitor
+
+```python
+from TopNMF.visualization import FitMonitor
+
+monitor = FitMonitor(
+    show=["loss", "basis", "PH"],
+    interval=50,
+    grid=(1, 3),
+)
+
+model.fit(X, n_iterations=5000, lambda_top=0.01, monitor=monitor)
+```
+
+See the [example notebooks](notebook/) for complete walkthroughs.
 
 ## Module Documentation
 
-### 1. `topological_nmf.py`
+### `model.py`
 
 Main class implementing topological NMF.
 
@@ -79,73 +98,61 @@ Main class implementing topological NMF.
 - `get_components()`: Get learned basis vectors
 - `get_losses()`: Get training loss history
 
-### 2. `losses.py`
+### `losses.py`
 
-Loss functions for topological NMF optimization.
+Loss functions for topological NMF optimisation.
 
 **Key Functions**:
 - `ph_sparsity_loss()`: L1²/L2² ratio for persistence diagrams
 - `target_diagram_loss()`: Compare diagrams to target diagrams
 - `weighted_persistence_loss()`: Weighted persistence with boundary penalty
-- `reconstruction_loss()`: NMF reconstruction error
-- `sparsity_loss()`: Hoyer sparsity or L1²/L2² loss
+- `clique_deviation_loss()`: Penalise clique deviation in graph bases
+- `total_variation()`: Total variation regularisation (1-D and 2-D)
 
-### 3. `nmf_utils.py`
+### `optim.py`
 
-Core NMF optimization utilities.
+Core NMF optimisation utilities.
 
 **Key Functions**:
 - `update_V()`: Update basis matrix with sparsity constraints
-- `sparse_opt()`: L1/L2 constrained optimization
+- `sparse_opt()`: L1/L2 constrained optimisation
 - `sparse_opt_hoyer()`: Hoyer's projection algorithm
-- `sparsity_score()`: Compute Hoyer sparsity measure
-- `svd_initialization()`: SVD-based initialization
-- `total_variation()`: Total variation regularization
 
-### 4. `topological_utils.py`
+### `utils.py`
 
-Topological data analysis functions.
+General-purpose helpers.
 
 **Key Functions**:
-- `center_point_cloud()`: Center and normalize point clouds
-- `center_point_cloud_torch()`: PyTorch version with gradient support
-- `compute_periodicity_score()`: Compute periodicity scores
+- `sparsity_score()`: Compute Hoyer sparsity measure
+- `svd_initialization()`: SVD-based NMF initialisation
+- `center_point_cloud()` / `center_point_cloud_torch()`: Center and normalise point clouds
+- `compute_periodicity_score()`: Compute periodicity from persistence
 - `compute_persistence_diagram()`: Full persistence diagram computation
 
-**Key Classes**:
-- `TimeDelayEmbeddingTorch`: PyTorch-based time delay embedding
+### `persistence/`
 
-### 5. `cubical_complex.py`
+Persistence computation backends sharing a unified `PersistenceInfo` named-tuple.
 
-Cubical complex for structured data (images, grids).
+- **`cubical.py`** -- `CubicalComplex`: differentiable persistence for 2-D/3-D grids (requires cripser)
+- **`rips.py`** -- `GudhiVietorisRipsComplex`: Vietoris-Rips complex; `TimeDelayEmbeddingTorch`: differentiable time-delay embedding
+- **`graph.py`** -- `GraphFiltrationPH`: persistence on edge-weighted graph filtrations
 
-**Key Class**: `CubicalComplex`
-- Differentiable persistence diagrams for 2D/3D data
-- Supports sublevel and superlevel filtrations
+### `visualization.py`
 
-### 6. `graph_filtration.py`
-
-Graph-based persistent homology.
-
-**Key Class**: `GraphFiltrationPH`
-- Computes persistence on graph filtrations
-- Edge weights define filtration values
-
-### 7. `visualization.py`
-
-Plotting and visualization utilities.
+Plotting utilities and live training callback.
 
 **Key Functions**:
-- `plot_gallery()`: Plot multiple signals/images in grid
+- `plot_gallery()`: Plot multiple signals/images in a grid
 - `plot_persistence_diagrams()`: Plot persistence diagrams
 - `plot_loss()`: Plot training loss curves
 - `plot_time_series_comparison()`: Compare original vs reconstructed
 - `plot_fourier_spectrum()`: Plot Fourier spectra
-- `plot_time_series()`: Plot time series in grid layout
-- `plot_gallery_graph()`: Visualize graph basis vectors
+- `plot_gallery_graph()`: Visualise graph basis vectors
 - `plot_PD_graph()`: Plot persistence diagrams for graphs
 
-### 8. `signal_generation.py`
+**Key Class**: `FitMonitor` -- live visualisation callback for `TopologicalNMF.fit()`
+
+### `signal_generation.py`
 
 Synthetic signal generation for testing.
 
@@ -154,12 +161,13 @@ Synthetic signal generation for testing.
 - `generate_mixed_periodic_nonperiodic()`: Mixed components
 - `generate_noisy_periodic()`: Noisy periodic signals
 - `generate_complex_signals()`: Various complex patterns
-- `normalize_signals()`: Signal normalization
+- `normalize_signals()`: Signal normalisation
 - `create_time_array()`: Time point generation
+- `create_ichimatsu_pattern()`: Checkerboard pattern images
 
 ## Key Parameters
 
-### TopologicalNMF.fit() Parameters
+### TopologicalNMF.fit()
 
 **Loss Weights**:
 - `lambda_apx`: Reconstruction loss weight (default: 1.0)
@@ -168,7 +176,7 @@ Synthetic signal generation for testing.
 - `lambda_spa_W`: Coefficient sparsity weight (default: 0.0)
 - `lambda_tv`: Total variation weight (default: 0.0)
 
-**Optimization**:
+**Optimisation**:
 - `lr`: Learning rate (default: 0.005)
 - `n_iterations`: Maximum iterations (default: 1000)
 - `gd_iter`: Gradient descent steps per epoch (default: 1)
@@ -180,6 +188,9 @@ Synthetic signal generation for testing.
 - `PH_dims`: Homology dimensions to use (default: [1])
 - `target_diagrams`: Target persistence diagrams
 - `target_periodicity`: Target periodicity scores
+
+**Visualisation**:
+- `monitor`: A `FitMonitor` instance for live plots (default: None)
 
 ## License
 

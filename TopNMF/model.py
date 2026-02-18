@@ -137,7 +137,7 @@ class TopologicalNMF:
         if scheduler is None:
             return
         if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
-            scheduler.step(loss)
+            scheduler.step(loss.detach())
         else:
             scheduler.step()
 

@@ -67,28 +67,34 @@ class GudhiVietorisRipsComplex:
         self.max_edge_length = max_edge_length
 
     def __call__(self, point_cloud: torch.Tensor) -> List[PersistenceInfo]:
-        points = np.asarray(point_cloud.detach().cpu().numpy(), dtype=np.float64)
-        if points.ndim != 2:
-            raise ValueError(
-                f"point_cloud must have shape (n_points, n_dimensions), "
-                f"got {points.shape}"
-            )
-
+        points_np = point_cloud.detach().cpu().numpy()
         rips = (
-            gudhi.RipsComplex(points=points)
+            gudhi.RipsComplex(points=points_np)
             if self.max_edge_length is None
-            else gudhi.RipsComplex(points=points, max_edge_length=float(self.max_edge_length))
+            else gudhi.RipsComplex(points=points_np, max_edge_length=float(self.max_edge_length))
         )
         simplex_tree = rips.create_simplex_tree(max_dimension=self.dim + 1)
         simplex_tree.compute_persistence()
+        gens = simplex_tree.flag_persistence_generators()
 
         result: List[PersistenceInfo] = []
         for h_dim in range(self.dim + 1):
-            intervals = np.asarray(
-                simplex_tree.persistence_intervals_in_dimension(h_dim),
-                dtype=np.float64,
-            )
-            if intervals.size == 0:
+            # Extract generator indices
+            if isinstance(gens[h_dim], list):
+                if len(gens[h_dim]) > 0:
+                    indices = torch.tensor(gens[h_dim][0], dtype=torch.long, device=point_cloud.device)
+                else:
+                    indices = torch.empty((0, 4), dtype=torch.long, device=point_cloud.device)
+            elif isinstance(gens[h_dim], np.ndarray):
+                if gens[h_dim].size > 0:
+                    indices = torch.tensor(gens[h_dim], dtype=torch.long, device=point_cloud.device)
+                else:
+                    # Default to 3 columns for H0, though it could be 4 for others if empty
+                    indices = torch.empty((0, 3 if h_dim == 0 else 4), dtype=torch.long, device=point_cloud.device)
+            else:
+                 indices = torch.empty((0, 4), dtype=torch.long, device=point_cloud.device)
+
+            if indices.shape[0] == 0:
                 result.append(PersistenceInfo(
                     diagram=torch.empty((0, 2), dtype=point_cloud.dtype,
                                         device=point_cloud.device),
@@ -98,21 +104,41 @@ class GudhiVietorisRipsComplex:
                 ))
                 continue
 
-            deaths = intervals[:, 1].copy()
-            finite_deaths = deaths[np.isfinite(deaths)]
-            replacement = (
-                float(np.max(finite_deaths))
-                if finite_deaths.size > 0
-                else float(np.max(intervals[:, 0]))
-            )
-            deaths[~np.isfinite(deaths)] = replacement
-            diagram_np = np.column_stack([intervals[:, 0], deaths])
+            # Compute persistence values from indices
+            if indices.shape[1] == 4:
+                birth_death = torch.norm(
+                    point_cloud[indices[:, (0, 2)]] - point_cloud[indices[:, (1, 3)]],
+                    dim=-1
+                )
+            elif indices.shape[1] == 3:
+                 deaths = torch.norm(
+                     point_cloud[indices[:, 1]] - point_cloud[indices[:, 2]],
+                     dim=-1
+                 )
+                 births = torch.zeros_like(deaths)
+                 birth_death = torch.stack([births, deaths], dim=1)
+            else:
+                 # Unexpected shape
+                 raise ValueError(f"Unexpected generator shape for dim {h_dim}: {indices.shape}")
+
+
+            deaths = birth_death[:, 1].clone()  # Clone to avoid in-place issues
+            finite_deaths = deaths[torch.isfinite(deaths)]
+            if len(finite_deaths) > 0:
+                replacement_val = torch.max(finite_deaths)
+            elif birth_death.shape[0] > 0:
+                replacement_val = torch.max(birth_death[:, 0])
+            else:
+                replacement_val = 0.0 # Should not happen given check above
+
+            deaths[~torch.isfinite(deaths)] = replacement_val
+
+            # Reconstruct diagram with replaced infinite deaths
+            diagram = torch.stack([birth_death[:, 0], deaths], dim=1)
 
             result.append(PersistenceInfo(
-                diagram=torch.as_tensor(diagram_np, dtype=point_cloud.dtype,
-                                        device=point_cloud.device),
-                pairing=torch.empty((diagram_np.shape[0], 0), dtype=torch.long,
-                                    device=point_cloud.device),
+                diagram=diagram,
+                pairing=indices, # Store the indices as pairing info
                 dimension=h_dim,
             ))
 

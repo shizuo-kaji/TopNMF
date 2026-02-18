@@ -1,166 +1,102 @@
 # AGENTS.md
 
-This file provides guidance for AI agents working with the TopNMF codebase.
+**Current Status**: Active Development
+**Last Updated**: 2026-02-18
 
-## Project Overview
+This document serves as the primary source of truth for AI agents working on the `TopNMF` repository. Read this before proposing or making changes.
 
-TopNMF is a Python package implementing Non-negative Matrix Factorization (NMF) with topological regularization via persistent homology. It combines classical NMF with Topological Data Analysis (TDA) to learn basis vectors that capture periodic and structured patterns in time-series and image data.
+## 1. Mission & Context
 
-## Repository Structure
+**TopNMF** is a Python library that combines Non-negative Matrix Factorization (NMF) with Topological Data Analysis (TDA).
+- **Goal**: Extract meaningful patterns (basis vectors) from data while enforcing topological constraints (e.g., sparsity, periodicity) using persistent homology.
+- **Core Mechanism**: We use a hybrid optimization approach.
+    - **NMF**: Standard multiplicative updates or projected gradient descent for non-negativity.
+    - **Topology**: PyTorch-based gradient descent on the persistence diagram to minimize topological losses.
 
-```
+## 2. Environment Setup
+
+- **Installation**:
+  ```bash
+  pip install -e ".[dev]"
+  ```
+- **Dependencies**: `numpy`, `torch`, `gudhi`, `scikit-learn`, `matplotlib`.
+- **Optional**: `cripser` (for `CubicalComplex`).
+
+## 3. Codebase Map
+
+The package is structured as follows. Use this map to locate logic.
+
+```text
 TopNMF/
-├── TopNMF/                      # Main package
-│   ├── __init__.py              # Public API exports
-│   ├── topological_nmf.py       # Core TopologicalNMF class
-│   ├── losses.py                # PH loss functions
-│   ├── nmf_utils.py             # NMF optimization utilities
-│   ├── topological_utils.py     # TDA utilities (embedding, PH computation)
-│   ├── cubical_complex.py       # Cubical complex for images/grids
-│   ├── graph_filtration.py      # Graph-based persistent homology
-│   ├── signal_generation.py     # Synthetic signal generation
-│   └── visualization.py         # Plotting utilities
-├── tests/                       # Pytest unit tests
-├── notebook/                    # Example and appendix notebooks
-│   ├── example.ipynb            # Usage walkthrough
-│   ├── Example 1.ipynb
-│   ├── Example 2.ipynb
-│   ├── Example 3.ipynb
-│   ├── Appendix 1.ipynb
-│   └── Appendix 2.ipynb
-├── pyproject.toml               # Package configuration
-└── README.md                    # Documentation
+├── TopNMF/                      # Main Package
+│   ├── __init__.py              # Public API
+│   ├── model.py                 # [CORE] TopologicalNMF class. The main estimator.
+│   ├── losses.py                # [CORE] Topological loss functions (ph_sparsity, etc.)
+│   ├── optim.py                 # [CORE] NMF optimization (update_V, sparse_opt)
+│   ├── visualization.py         # Plotting & FitMonitor callback
+│   ├── utils.py                 # General helpers (sparsity_score, etc.)
+│   ├── signal_generation.py     # Synthetic data generators
+│   └── persistence/             # [COMPLEX] TDA Backends
+│       ├── __init__.py
+│       ├── rips.py              # GudhiVietorisRipsComplex & TimeDelayEmbeddingTorch
+│       ├── cubical.py           # CubicalComplex (images)
+│       └── graph.py             # GraphFiltrationPH (graphs)
+├── tests/                       # Pytest suite
+├── notebook/                    # Example notebooks
+├── pyproject.toml               # Config
+└── README.md                    # User facing documentation
 ```
 
-## Key Files
+### Key Files
+- **`model.py`**: Contains `TopologicalNMF.fit()`. This is the loop where NMF updates and Topological gradient steps are interleaved.
+- **`persistence/rips.py`**: Handles differentiation through the persistence calculation using `torch.autograd`. **Critical for topological loss.**
+- **`losses.py`**: Contains `ph_sparsity_loss`, `target_diagram_loss`, etc.
 
-| File | Purpose |
-|------|---------|
-| `TopNMF/topological_nmf.py` | Main `TopologicalNMF` class with fit/transform methods |
-| `TopNMF/losses.py` | Loss functions: `ph_sparsity_loss`, `target_diagram_loss`, `weighted_persistence_loss` |
-| `TopNMF/nmf_utils.py` | Core NMF: `update_V`, `sparse_opt`, `sparse_opt_hoyer`, `svd_initialization` |
-| `TopNMF/topological_utils.py` | TDA: `TimeDelayEmbeddingTorch`, `center_point_cloud`, `compute_periodicity_score` |
-| `TopNMF/cubical_complex.py` | `CubicalComplex` class for image persistence |
-| `TopNMF/graph_filtration.py` | `GraphFiltrationPH` class for graph persistence |
+## 4. Development Guidelines
 
-## Development Guidelines
+### 4.1. Coding Standards
+- **Type Hints**: STRICTLY REQUIRED for all function signatures.
+- **Docstrings**: NumPy style. Must include Parameters and Returns.
+- **Imports**: Absolute imports within the package preferred (or relative `from . import`).
+- **Tensors**:
+    - Use `torch.Tensor` for anything that needs gradients.
+    - Ensure `device` (cpu/cuda) is consistent.
 
-### Code Style
+### 4.2. Mathematical Integrity
+- **Non-negativity**: NMF requires $W, V \ge 0$. Ensure projections (`clamp(min=0)`) are preserved after gradient steps.
+- **Differentiability**: The link between the data and the persistence diagram is delicate. We use `torch-topological` concepts or custom `autograd.Function` wrappers around GUDHI. **Do not replace these with non-differentiable standard library calls.**
 
-- Use type hints for function signatures
-- Follow NumPy docstring conventions
-- Keep functions focused and single-purpose
-- Use PyTorch tensors for gradient-enabled operations
+### 4.3. Working with TDA
+- **point_cloud**: Usually shape `(n_points, dimensionality)`.
+- **diagrams**: List of tensor pairs `(birth, death)`.
+- **losses**: Usually operate on the `persistence = death - birth`.
 
-### Key Dependencies
+## 5. Workflows
 
-- `torch`: Tensor operations and automatic differentiation
-- `gudhi`: Persistence computation (Vietoris-Rips, cubical complexes)
-- `ripser`: Fast Vietoris-Rips persistence
-- `torch-topological`: Differentiable topology operations
-
-### Adding New Loss Functions
-
-Add to `TopNMF/losses.py` and export in `TopNMF/__init__.py`:
-
-```python
-def new_loss(diagrams, **kwargs):
-    """
-    Docstring with parameters and returns.
-    """
-    # Implementation using PyTorch for gradient support
-    return loss_value
-```
-
-### Adding New Complex Types
-
-Inherit from `nn.Module` and implement `forward()` method that returns persistence information compatible with existing loss functions.
-
-## Testing
-
+### 5.1. Running Tests
+Current test suite uses `pytest`.
 ```bash
-# Run all tests
 pytest
-
-# Run with coverage
-pytest --cov=TopNMF
-
-# Run specific test file
-pytest tests/test_nmf_utils.py -v
 ```
-
-### Test Files
-
-- `tests/test_nmf_utils.py`: NMF utility function tests
-- `tests/test_signal_generation.py`: Signal generation tests
-- `tests/test_topological_utils.py`: TDA utility tests
-- `tests/conftest.py`: Shared pytest fixtures
-
-### Writing Tests
-
-Use fixtures from `conftest.py`:
-
-```python
-def test_example(time_array, sample_signals):
-    # time_array and sample_signals are fixtures
-    result = some_function(sample_signals)
-    assert result.shape == expected_shape
-```
-
-## Common Tasks
-
-### Running the Example
-
+Always run specific relevant tests if modifying core logic:
 ```bash
-jupyter notebook notebook/example.ipynb
+pytest tests/test_model.py  # (example)
 ```
 
-### Installing for Development
+### 5.2. Verifying Convergence
+Since TDA optimization is stochastic and complex, unit tests might pass while the model fails to learn.
+- **Check**: Use `notebook/1D Signal.ipynb` or a simple script to fit `TopologicalNMF` on a simple synthetic signal (e.g., sine wave).
+- **Metric**: Watch the `PH` loss and `approx` loss. `PH` should decrease or stabilize.
 
-```bash
-pip install -e ".[dev]"
-```
+### 5.3. Debugging
+- **"Loss is nan"**: Check for division by zero in `losses.py` (e.g., `l1 / l2`). Check `epsilon` in `optim.py`.
+- **"No Gradient"**: Ensure the `complex` being used (e.g., `GudhiVietorisRipsComplex`) is correctly attached to the computation graph.
 
-### Checking Public API
+## 6. Do's and Don'ts
 
-All public exports are listed in `TopNMF/__init__.py` under `__all__`.
-
-## Architecture Notes
-
-### Optimization Strategy
-
-The `TopologicalNMF.fit()` method uses a hybrid approach:
-1. **Multiplicative updates** (via `mu_iter`): Standard NMF updates preserving non-negativity
-2. **Gradient descent** (via `gd_iter`): AdamW optimizer for topological losses
-
-### Time Delay Embedding
-
-For 1D time series, `TimeDelayEmbeddingTorch` creates point clouds from scalar signals:
-- Input: `(T,)` tensor
-- Output: `(T - (d-1)*tau, d)` tensor
-- Used to reconstruct attractor manifold for TDA
-
-### Persistence Computation
-
-Three complex types supported:
-1. **Vietoris-Rips**: Default for time series (via `gudhi` or `ripser`)
-2. **Cubical**: For images/grids (via `CubicalComplex`)
-3. **Graph**: For graph-structured data (via `GraphFiltrationPH`)
-
-## Debugging Tips
-
-### Loss Not Decreasing
-
-- Check `lambda_top` weight (start with small values like 0.001)
-- Verify embedding parameters `M` and `tau` are appropriate for signal length
-- Ensure input data is normalized
-
-### CUDA Errors
-
-- Check tensor device consistency with `model.device`
-- Some gudhi operations require CPU tensors
-
-### Persistence Computation Issues
-
-- Verify point cloud is not degenerate (all same point)
-- Check `PH_dims` matches expected homology dimensions
+| DO | DON'T |
+|----|-------|
+| Use `torch` functions for math to preserve gradients. | Use `numpy` functions on tensors inside the `fit` loop (breaks graph). |
+| Check `device` before creating new tensors. | Hardcode `.cuda()` or assume CPU. |
+| Add type hints to every new function. | Leave arguments untyped. |
+| Run `pytest` before submitting changes. | Assume "it looks correct". |

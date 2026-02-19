@@ -48,15 +48,10 @@ from .visualization import (
 )
 
 from .signal_generation import (
-    create_ichimatsu_pattern,
+    generate_ichimatsu_pattern,
     generate_signals,
-    generate_mixed_periodic_nonperiodic,
-    generate_noisy_periodic,
-    generate_complex_signals,
-    generate_noisy_signals,
-    generate_step_signals,
+    generate_edge_weighted_graph,
     normalize_signals,
-    create_time_array,
 )
 
 __version__ = '1.0.0'
@@ -96,13 +91,8 @@ __all__ = [
     'plot_gallery_graph',
     'plot_PD_graph',
     # Signal generation
-    'create_ichimatsu_pattern',
+    'generate_ichimatsu_pattern',
     'generate_signals',
-    'generate_mixed_periodic_nonperiodic',
-    'generate_noisy_periodic',
-    'generate_complex_signals',
-    'generate_noisy_signals',
-    'generate_step_signals',
+    'generate_edge_weighted_graph',
     'normalize_signals',
-    'create_time_array',
 ]

@@ -160,10 +160,8 @@ Synthetic signal generation for testing.
 - `generate_signals()`: Cosine or triangle signals
 - `generate_mixed_periodic_nonperiodic()`: Mixed components
 - `generate_noisy_periodic()`: Noisy periodic signals
-- `generate_complex_signals()`: Various complex patterns
 - `normalize_signals()`: Signal normalisation
-- `create_time_array()`: Time point generation
-- `create_ichimatsu_pattern()`: Checkerboard pattern images
+- `generate_ichimatsu_pattern()`: Checkerboard pattern images
 
 ## Key Parameters
 

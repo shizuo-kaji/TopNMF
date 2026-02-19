@@ -6,11 +6,12 @@ with various characteristics for testing and experimentation.
 """
 
 import numpy as np
-from typing import Dict, Optional
+from itertools import combinations
+from typing import List, Optional, Tuple, Union
 from scipy import signal
 import random
 
-def create_ichimatsu_pattern(
+def generate_ichimatsu_pattern(
     num_samples: int = 100,
     image_shape=(36, 36),
     pat: Optional[np.ndarray] = None,
@@ -62,7 +63,12 @@ def create_ichimatsu_pattern(
     return X
 
 
-def generate_signals(t: np.ndarray, kind: str = "cosine") -> Dict[str, np.ndarray]:
+def generate_signals(
+    t: np.ndarray,
+    kind: str = "cosine",
+    num: int = 2,
+    noise: float = 0.0,
+) -> List[np.ndarray]:
     """
     Generate either cosine-based or triangle-like signals with linear trends.
 
@@ -73,219 +79,101 @@ def generate_signals(t: np.ndarray, kind: str = "cosine") -> Dict[str, np.ndarra
     kind : str, optional
         Type of signals to generate. Options: "cosine", "triangle".
         Default is "cosine".
+    num : int, optional
+        Number of signals to generate. Default is 2.
+    noise : float, optional
+        Standard deviation of additive Gaussian noise. Default is 0.0.
 
     Returns
     -------
-    Dict[str, np.ndarray]
-        Dictionary with signal names as keys and signal arrays as values
+    List[np.ndarray]
+        List of signal arrays
     """
-    
     kind = kind.lower()
-    
+
     if kind == "cosine":
-        return {
-            "cosine 1": np.cos(2 * t) + t + 1,
-            "cosine 2": 0.5 * np.cos(2 * t) + 2 * t + 0.5,
-        }
-
+        base_fn = lambda a, b: a * np.cos(2 * t) + b * t + 1
     elif kind == "triangle":
-        return {
-            "triangle 1": signal.sawtooth(2 * t - np.pi, 0.5) + t + 1,
-            "triangle 2": 0.5 * signal.sawtooth(2 * t - np.pi, 0.5) + 2 * t + 0.5,
-        }
-
+        base_fn = lambda a, b: a * signal.sawtooth(2 * t - np.pi, 0.5) + b * t + 1
     else:
         raise ValueError("kind must be either 'cosine' or 'triangle'")
 
+    amplitudes = np.linspace(2.0, 1.0, num)
+    slopes = np.linspace(1.0, 2.0, num)
 
+    signals = []
+    for a, b in zip(amplitudes, slopes):
+        s = base_fn(a, b)
+        if noise > 0:
+            s = s + noise * np.random.randn(len(t))
+        signals.append(s / np.max(np.abs(s)) if np.max(np.abs(s)) > 0 else s)
 
-def generate_mixed_periodic_nonperiodic(t: np.ndarray) -> Dict[str, np.ndarray]:
-    """
-    Generate signals mixing periodic and non-periodic components.
-
-    Parameters
-    ----------
-    t : np.ndarray
-        Time points array
-
-    Returns
-    -------
-    Dict[str, np.ndarray]
-        Dictionary with signal names as keys and signal arrays as values
-    """
-    return {
-        "linear_cosine": t / (4 * np.pi) + np.cos(t),
-        "quadratic_cosine": t**2 / (4 * np.pi)**2 + np.cos(t),
-        "gaussian_cosine": t / (4 * np.pi) + np.exp(-t**2),
-    }
-
-
-def generate_noisy_periodic(t: np.ndarray) -> Dict[str, np.ndarray]:
-    """
-    Generate noisy periodic signals with Gaussian components.
-
-    Parameters
-    ----------
-    t : np.ndarray
-        Time points array
-
-    Returns
-    -------
-    Dict[str, np.ndarray]
-        Dictionary with signal names as keys and signal arrays as values
-    """
-    return {
-        "cosine_gaussian_1": np.cos(1 * t) + 2 * np.exp(-t**2),
-        "cosine_gaussian_2": np.cos(5 * t) + 2 * np.exp(-t**2),
-        "cosine_gaussian_3": np.cos(3 * t) + np.exp(-t**2),
-        "cosine_gaussian_4": np.cos(4 * t) + np.exp(-t**2),
-    }
-
-
-def generate_complex_signals(t: np.ndarray) -> Dict[str, np.ndarray]:
-    """
-    Generate complex mixed signals with various components.
-
-    Parameters
-    ----------
-    t : np.ndarray
-        Time points array
-
-    Returns
-    -------
-    Dict[str, np.ndarray]
-        Dictionary with signal names as keys and signal arrays as values
-    """
-    signals = {
-        "ramp_cosine": t / (4 * np.pi) + np.cos(t),
-        "quadratic_cosine": (t**2) / (4 * np.pi)**2 + np.cos(t),
-        "gaussian_bump": np.exp(-((t - 2 * np.pi)**2)) + np.cos(t),
-        "chirp": 0.5 * np.cos(t) + np.sin(t**1.5),
-        "step_cosine": (t > 2 * np.pi).astype(float) + np.cos(t),
-        "sawtooth_cosine": (t % (2 * np.pi)) / (2 * np.pi) + np.cos(t),
-    }
     return signals
 
 
-def generate_noisy_signals(t: np.ndarray, n_samples: int = 5,
-                            noise_scale: float = 0.1,
-                            seed: Optional[int] = None) -> Dict[str, np.ndarray]:
+def generate_edge_weighted_graph(
+    cliques: Tuple[Tuple[int, ...], ...] = ((1, 2, 3, 4, 5), (5, 6, 7), (6, 7, 8, 9)),
+    weights: Tuple[Tuple[float, ...], ...] = ((2, 1, 2), (1, 2, 1), (1, 1, 2)),
+) -> Tuple[np.ndarray, list]:
     """
-    Generate multiple noisy signal realizations.
+    Build edge-weight vectors from overlapping cliques with given mixing coefficients.
 
     Parameters
     ----------
-    t : np.ndarray
-        Time points array
-    n_samples : int, optional
-        Number of signal samples to generate
-    noise_scale : float, optional
-        Standard deviation of Gaussian noise
-    seed : int, optional
-        Random seed for reproducibility
+    cliques : tuple of tuples of int
+        Each inner tuple defines the nodes of one clique.
+    weights : tuple of tuples of float
+        Each inner tuple gives the mixing coefficients over *cliques*
+        for one observation (row of the returned matrix).
 
     Returns
     -------
-    Dict[str, np.ndarray]
-        Dictionary with signal names as keys and signal arrays as values
+    X : np.ndarray, shape (len(weights), n_edges)
+        Edge-weight matrix.
+    edge_list : list of (int, int)
+        Sorted list of all node pairs in the complete graph over the nodes.
     """
-    signals = {}
-    for i in range(n_samples):
-        if seed is not None:
-            np.random.seed(seed + i)
-        periodic = np.cos(t)
-        non_periodic = t / (4 * np.pi)
-        noise = noise_scale * np.random.randn(len(t))
-        mixed = periodic + non_periodic + noise
-        signals[f"signal_seed_{i}"] = mixed
-    return signals
+    all_nodes = sorted({i for clique in cliques for i in clique})
+    edge_list = [tuple(sorted(e)) for e in combinations(all_nodes, 2)]
+    edge_index = {e: i for i, e in enumerate(edge_list)}
+    X = []
+
+    for alpha in weights:
+        row = np.zeros(len(edge_list))
+        for coeff, clique in zip(alpha, cliques):
+            for u, v in combinations(clique, 2):
+                row[edge_index[tuple(sorted((u, v)))]] += coeff
+        X.append(row)
+
+    return np.stack(X), edge_list
 
 
-def generate_step_signals(t: np.ndarray, n_samples: int = 5,
-                           noise_scale: float = 0.01,
-                           seed: Optional[int] = None) -> Dict[str, np.ndarray]:
+def normalize_signals(
+    signals: Union[List[np.ndarray], np.ndarray],
+) -> Union[List[np.ndarray], np.ndarray]:
     """
-    Generate signals with step discontinuities and periodic components.
+    Min-max normalize signals to [0, 1].
 
     Parameters
     ----------
-    t : np.ndarray
-        Time points array
-    n_samples : int, optional
-        Number of signal samples to generate
-    noise_scale : float, optional
-        Standard deviation of Gaussian noise
-    seed : int, optional
-        Random seed for reproducibility
+    signals : list of np.ndarray or np.ndarray
+        A list of 1-D arrays, or a single array (1-D or 2-D).
+        For a 2-D array each row is normalized independently.
 
     Returns
     -------
-    Dict[str, np.ndarray]
-        Dictionary with signal names as keys and signal arrays as values
+    list of np.ndarray or np.ndarray
+        Normalized signals in the same format as the input.
     """
-    signals = {}
-    for i in range(n_samples):
-        if seed is not None:
-            np.random.seed(seed + i)
-        periodic = np.cos(t)
-        non_periodic = (t > 2 * np.pi).astype(float)
-        noise = noise_scale * np.random.randn(len(t))
-        mixed = periodic + non_periodic + noise
-        signals[f"signal_seed_{i}"] = mixed
-    return signals
+    if isinstance(signals, np.ndarray):
+        if signals.ndim == 1:
+            mn, mx = signals.min(), signals.max()
+            return (signals - mn) / (mx - mn) if mx != mn else np.zeros_like(signals)
+        # 2-D: normalize each row
+        mn = signals.min(axis=1, keepdims=True)
+        mx = signals.max(axis=1, keepdims=True)
+        denom = mx - mn
+        denom[denom == 0] = 1.0
+        return (signals - mn) / denom
 
-
-def normalize_signals(signals: Dict[str, np.ndarray],
-                      method: str = 'max') -> Dict[str, np.ndarray]:
-    """
-    Normalize signals to a common scale.
-
-    Parameters
-    ----------
-    signals : Dict[str, np.ndarray]
-        Dictionary of signals to normalize
-    method : str, optional
-        Normalization method: 'max' (divide by max), 'std' (standardize),
-        'minmax' (scale to [0,1])
-
-    Returns
-    -------
-    Dict[str, np.ndarray]
-        Dictionary of normalized signals
-    """
-    normalized = {}
-
-    for name, sig in signals.items():
-        if method == 'max':
-            normalized[name] = sig / np.max(np.abs(sig))
-        elif method == 'std':
-            normalized[name] = (sig - np.mean(sig)) / np.std(sig)
-        elif method == 'minmax':
-            min_val, max_val = np.min(sig), np.max(sig)
-            normalized[name] = (sig - min_val) / (max_val - min_val)
-        else:
-            raise ValueError(f"Unknown normalization method: {method}")
-
-    return normalized
-
-
-def create_time_array(start: float = 0, stop: float = 2*np.pi,
-                      n_points: int = 100) -> np.ndarray:
-    """
-    Create a linearly spaced time array.
-
-    Parameters
-    ----------
-    start : float, optional
-        Start time
-    stop : float, optional
-        End time
-    n_points : int, optional
-        Number of time points
-
-    Returns
-    -------
-    np.ndarray
-        Time array
-    """
-    return np.linspace(start, stop, n_points)
+    return [normalize_signals(s) for s in signals]

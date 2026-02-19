@@ -65,7 +65,7 @@ def plot_gallery(images, title: str = "", n_col: int = 5, n_row: int = 5,
 
 def plot_persistence_diagrams(data, n_col: int = 5, n_row: int = 5,
                               superlevel: bool = False, PHmode: str = "V",
-                              M: int = 1, tau: int = 1, axs=None,
+                              embedding_dim: int = 1, tau: int = 1, axs=None,
                               center_func=None, use_embedding: bool = True):
     """
     Compute and plot persistence diagrams for multiple signals/images.
@@ -80,7 +80,7 @@ def plot_persistence_diagrams(data, n_col: int = 5, n_row: int = 5,
         Whether to compute superlevel set persistence.
     PHmode : str
         'V' for vertex-based, 'T' for top-dimensional cells.
-    M : int
+    embedding_dim : int
         Embedding dimension minus 1.
     tau : int
         Time delay.
@@ -107,7 +107,7 @@ def plot_persistence_diagrams(data, n_col: int = 5, n_row: int = 5,
                 cc = gudhi.CubicalComplex(top_dimensional_cells=sign * comp)
             pd = cc.persistence()
         else:
-            embedder = TimeDelayEmbedding(dim=M + 1, delay=tau)
+            embedder = TimeDelayEmbedding(dim=embedding_dim + 1, delay=tau)
             embedded = embedder(comp)
             centered = center_func(embedded) if center_func is not None else embedded
             rips = gudhi.RipsComplex(points=centered).create_simplex_tree(max_dimension=2)
@@ -274,7 +274,7 @@ def plot_gallery_graph(edge_values: Union[np.ndarray, torch.Tensor],
         G = nx.Graph()
         G.add_edges_from(edge_weights.keys())
 
-        nx.draw_networkx_nodes(G, pos, node_color='lightcoral', node_size=600,
+        nx.draw_networkx_nodes(G, pos, node_color='lightcoral', node_size=200,
                                edgecolors='black', ax=ax)
         if use_labels:
             nx.draw_networkx_labels(G, pos, font_size=10, font_color='black', ax=ax)
@@ -465,11 +465,11 @@ class FitMonitor:
         self._ax_ph = None
         self._disp_ph = None
 
-    def setup(self, *, n_features, M, tau, complex_inputs=None,
+    def setup(self, *, n_features, embedding_dim, tau, complex_inputs=None,
               data_shape=None, use_embedding=False):
         """Initialise figures and display handles. Called once by ``fit()``."""
         self._n_features = n_features
-        self._M = M
+        self._embedding_dim = embedding_dim
         self._tau = tau
         self._complex_inputs = complex_inputs
         self._data_shape = data_shape
@@ -546,11 +546,11 @@ class FitMonitor:
                     axs=self._ax_ph, superlevel=self.superlevel)
             else:
                 tau = (self._tau if self._tau is not None
-                       else int(self._n_features / (2 * (self._M + 1))))
+                       else int(self._n_features / (2 * (self._embedding_dim + 1))))
                 plot_persistence_diagrams(
                     V_display, n_col=n_col, n_row=n_row,
                     superlevel=self.superlevel, PHmode=self.PHmode,
-                    M=self._M, tau=tau, axs=self._ax_ph,
+                    embedding_dim=self._embedding_dim, tau=tau, axs=self._ax_ph,
                     use_embedding=self._use_embedding)
             self._disp_ph.update(self._fig_ph)
 

@@ -145,11 +145,11 @@ class TopologicalNMF:
     # Persistence helpers
     # ------------------------------------------------------------------
 
-    def _resolve_embedder(self, n_features, M, tau):
+    def _resolve_embedder(self, n_features, embedding_dim, tau):
         if not self.use_embedding:
             return None, tau
-        resolved_tau = tau if tau is not None else int(n_features / (2 * (M + 1)))
-        return TimeDelayEmbeddingTorch(dim=M + 1, delay=resolved_tau), resolved_tau
+        resolved_tau = tau if tau is not None else int(n_features / (2 * (embedding_dim + 1)))
+        return TimeDelayEmbeddingTorch(dim=embedding_dim + 1, delay=resolved_tau), resolved_tau
 
     def _resolve_complex(self):
         if self.complex is not None:
@@ -306,7 +306,7 @@ class TopologicalNMF:
         gd_iter: int = 1,
         mu_iter: int = 0,
         W_iter: int = 0,
-        M: int = 4,
+        embedding_dim: int = 4,
         tau: Optional[int] = None,
         PH_dims: List[int] = [1],
         tol: float = 1e-4,
@@ -350,7 +350,7 @@ class TopologicalNMF:
             Multiplicative-update steps per epoch.
         W_iter : int
             W-update sub-steps per multiplicative update.
-        M : int
+        embedding_dim : int
             Time-delay embedding dimension minus 1.
         tau : int, optional
             Time delay (auto-computed if None and use_embedding is True).
@@ -385,7 +385,7 @@ class TopologicalNMF:
         epsilon = 1e-10
 
         X_t = self._initialize_model_tensors(X, init_method, normalize_V_max, epsilon)
-        embedder, tau = self._resolve_embedder(n_features, M, tau)
+        embedder, tau = self._resolve_embedder(n_features, embedding_dim, tau)
         ph_complex = self._resolve_complex()
 
         optimizer = self._build_optimizer(
@@ -396,7 +396,7 @@ class TopologicalNMF:
 
         if monitor is not None:
             monitor.setup(
-                n_features=n_features, M=M, tau=tau,
+                n_features=n_features, embedding_dim=embedding_dim, tau=tau,
                 complex_inputs=complex_inputs,
                 data_shape=self.data_shape,
                 use_embedding=self.use_embedding,

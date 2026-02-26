@@ -145,10 +145,15 @@ class TopologicalNMF:
     # Persistence helpers
     # ------------------------------------------------------------------
 
-    def _resolve_embedder(self, n_features, embedding_dim, tau):
+    def _resolve_embedder(self, n_features, embedding_dim, tau, n_periods=None):
         if not self.use_embedding:
             return None, tau
-        resolved_tau = tau if tau is not None else int(n_features / (2 * (embedding_dim + 1)))
+        if tau is None:
+            if n_periods is None:
+                n_periods = int(np.round(embedding_dim / 2))
+            resolved_tau = int(n_features / (n_periods * (embedding_dim + 1)))
+        else:
+            resolved_tau = tau
         return TimeDelayEmbeddingTorch(dim=embedding_dim + 1, delay=resolved_tau), resolved_tau
 
     def _resolve_complex(self):
@@ -308,6 +313,7 @@ class TopologicalNMF:
         W_iter: int = 0,
         embedding_dim: int = 4,
         tau: Optional[int] = None,
+        n_periods: Optional[int] = None,
         PH_dims: List[int] = [1],
         tol: float = 1e-4,
         tol_count: int = 50000,
@@ -354,6 +360,8 @@ class TopologicalNMF:
             Time-delay embedding dimension minus 1.
         tau : int, optional
             Time delay (auto-computed if None and use_embedding is True).
+        n_periods : int, optional
+            Number of expected periods (used only if tau is None).
         PH_dims : list of int
             Homology dimensions to optimise.
         tol, tol_count : float, int
@@ -385,7 +393,7 @@ class TopologicalNMF:
         epsilon = 1e-10
 
         X_t = self._initialize_model_tensors(X, init_method, normalize_V_max, epsilon)
-        embedder, tau = self._resolve_embedder(n_features, embedding_dim, tau)
+        embedder, tau = self._resolve_embedder(n_features, embedding_dim, tau, n_periods)
         ph_complex = self._resolve_complex()
 
         optimizer = self._build_optimizer(

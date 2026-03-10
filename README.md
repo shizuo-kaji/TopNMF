@@ -1,195 +1,219 @@
-# TopNMF: Topological Non-negative Matrix Factorization
+# TopNMF
 
-TopNMF is a NumPy/PyTorch implementation of Non-negative Matrix Factorization (NMF) with topological regularisation. The core `TopologicalNMF` class augments standard NMF loss with persistent homology penalties to capture periodic, structured, or sparse behaviours in time-series, image, and graph data.
+TopNMF is a Python library for non-negative matrix factorisation (NMF) with topological regularisation. It combines standard reconstruction losses with persistent homology penalties so learned basis vectors can favour sparse, periodic, image-like, or graph-structured components.
 
-Written by Shizuo Kaji and Keunsu Kim
+Written by Shizuo Kaji and Keunsu Kim.
 
-## Repository Layout
+## What TopNMF Supports
 
-```
-.
-├── TopNMF/                        # Installable Python package
-│   ├── __init__.py                # Re-exports public API (__version__ = 1.0.0)
-│   ├── model.py                   # TopologicalNMF class
-│   ├── losses.py                  # PH loss functions (sparsity, target diagram, etc.)
-│   ├── optim.py                   # Sparse NMF updates (update_V, sparse_opt, sparse_opt_hoyer)
-│   ├── utils.py                   # Sparsity score, SVD init, periodicity helpers
-│   ├── persistence/               # Persistence computation backends
-│   │   ├── __init__.py            # Unified PersistenceInfo type
-│   │   ├── cubical.py             # CubicalComplex (requires cripser)
-│   │   ├── rips.py                # GudhiVietorisRipsComplex + TimeDelayEmbeddingTorch
-│   │   └── graph.py               # GraphFiltrationPH for edge-weighted graphs
-│   ├── signal_generation.py       # Synthetic datasets for demos/tests
-│   └── visualization.py           # Plotting utilities + FitMonitor callback
-├── tests/                         # Pytest unit tests
-├── notebook/                      # Example notebooks
-│   ├── 1D Signal.ipynb            # Time-series decomposition (Rips + cubical)
-│   ├── 2D Image.ipynb             # Image decomposition (Hangul + ichimatsu)
-│   └── Edge-weighted Graph.ipynb  # Graph decomposition (overlapping cliques)
-├── pyproject.toml                 # Package configuration
-├── AGENTS.md                      # AI agent development guide
-└── README.md                      # This document
-```
+- 1-D signals with optional time-delay embedding and Vietoris-Rips persistence
+- 2-D grid or image data via cubical complexes
+- Edge-weighted graphs via simplex-tree filtrations
+- PyTorch-based optimisation with explicit non-negativity constraints on both factors
 
 ## Installation
 
-```bash
-# Install from source with pip
-pip install -e .
+TopNMF targets Python 3.9 or newer.
 
-# Or install with dev dependencies for testing
+```bash
+pip install -e .
+```
+
+For tests and development tools:
+
+```bash
 pip install -e ".[dev]"
 ```
 
-### Optional dependencies
-
-- **cripser** -- required for `CubicalComplex` (image/grid persistence). Install separately; the rest of the package works without it.
+The current project metadata installs the persistent-homology backends used by the package, including `gudhi`, `ripser`, and `cripser`.
 
 ## Quick Start
 
-### Basic Usage
+### Time-Series Decomposition
 
 ```python
 import numpy as np
-from TopNMF import TopologicalNMF, generate_signals, create_time_array
+from TopNMF import TopologicalNMF, generate_signals
 
-# Generate synthetic signals
-t = create_time_array(0, 4 * np.pi, 200)
-signals = generate_signals(t, kind="cosine")
-X = np.stack(list(signals.values()))
+t = np.linspace(0.0, 4.0 * np.pi, 200)
+X = np.vstack(generate_signals(t, kind="cosine", num=4))
 
-# Fit TopologicalNMF
 model = TopologicalNMF(n_components=2, use_embedding=True)
-model.fit(X, n_iterations=500, lambda_top=0.01)
+model.fit(
+    X,
+    n_iterations=300,
+    lambda_top=1e-2,
+    embedding_dim=4,
+    verbose=False,
+)
 
-# Get results
-V = model.get_components()
+components = model.get_components()
+coefficients = model.transform(X)
+reconstruction = model.inverse_transform()
 losses = model.get_losses()
 ```
 
-### Live visualisation with FitMonitor
+### Image Decomposition with Cubical Persistence
 
 ```python
-from TopNMF.visualization import FitMonitor
+from TopNMF import CubicalComplex, TopologicalNMF, generate_ichimatsu_pattern
 
-monitor = FitMonitor(
-    show=["loss", "basis", "PH"],
-    interval=50,
-    grid=(1, 3),
+images = generate_ichimatsu_pattern(
+    num_samples=8,
+    image_shape=(24, 24),
+    min_pat=2,
+    max_pat=4,
+    seed=0,
 )
+X = images.reshape(images.shape[0], -1)
 
-model.fit(X, n_iterations=5000, lambda_top=0.01, monitor=monitor)
+model = TopologicalNMF(
+    n_components=3,
+    complex=CubicalComplex(mode="V"),
+    data_shape=(24, 24),
+)
+model.fit(X, n_iterations=200, lambda_top=1e-2, verbose=False)
 ```
 
-See the [example notebooks](notebook/) for complete walkthroughs.
+### Graph Decomposition
 
-## Module Documentation
+```python
+from TopNMF import GraphFiltrationPH, TopologicalNMF, generate_edge_weighted_graph
 
-### `model.py`
+X, edge_list = generate_edge_weighted_graph()
 
-Main class implementing topological NMF.
+model = TopologicalNMF(
+    n_components=3,
+    complex=GraphFiltrationPH(max_dim=1),
+)
+model.fit(
+    X,
+    n_iterations=200,
+    lambda_top=1e-2,
+    complex_inputs={"all_edges": edge_list},
+    verbose=False,
+)
+```
 
-**Key Class**: `TopologicalNMF`
+## Core API
 
-**Key Methods**:
-- `fit(X, ...)`: Fit model to data with topological constraints
-- `transform(X)`: Get coefficient matrix
-- `inverse_transform(W)`: Reconstruct data from coefficients
-- `get_components()`: Get learned basis vectors
-- `get_losses()`: Get training loss history
+### `TopologicalNMF`
 
-### `losses.py`
+Main estimator for alternating between reconstruction updates and topological optimisation.
 
-Loss functions for topological NMF optimisation.
+Important constructor arguments:
 
-**Key Functions**:
-- `ph_sparsity_loss()`: L1²/L2² ratio for persistence diagrams
-- `target_diagram_loss()`: Compare diagrams to target diagrams
-- `weighted_persistence_loss()`: Weighted persistence with boundary penalty
-- `clique_deviation_loss()`: Penalise clique deviation in graph bases
-- `total_variation()`: Total variation regularisation (1-D and 2-D)
+- `n_components`: number of basis vectors
+- `device`: `"cpu"` or `"cuda"`
+- `complex`: persistence backend; defaults to `GudhiVietorisRipsComplex(dim=1, p=2)`
+- `ph_loss_fn`: topological loss function; defaults to `ph_sparsity_loss`
+- `ph_loss_params`: extra keyword arguments forwarded to `ph_loss_fn`
+- `data_shape`: sample shape for structured inputs such as images
+- `use_embedding`: enables time-delay embedding for 1-D signals
 
-### `optim.py`
+Important `fit()` arguments:
 
-Core NMF optimisation utilities.
+- `n_iterations`, `lr`: optimisation length and learning rate
+- `lambda_apx`, `lambda_top`, `lambda_spa_V`, `lambda_spa_W`, `lambda_tv`: loss weights
+- `gd_iter`, `mu_iter`, `W_iter`: gradient and multiplicative-update scheduling
+- `target_sparsity`, `target_diagrams`, `target_periodicity`: optional topology or sparsity targets
+- `embedding_dim`, `tau`, `n_periods`, `PH_dims`: persistent-homology configuration
+- `normalize`, `normalize_V_max`: optional post-step normalisation
+- `start_epoch_topological`: delay before topological loss activates
+- `complex_inputs`: extra backend inputs such as graph edge lists
+- `monitor`: live visualisation callback
 
-**Key Functions**:
-- `update_V()`: Update basis matrix with sparsity constraints
-- `sparse_opt()`: L1/L2 constrained optimisation
-- `sparse_opt_hoyer()`: Hoyer's projection algorithm
+Main methods:
 
-### `utils.py`
+- `fit(X, ...)`: train the model on a non-negative data matrix of shape `(n_samples, n_features)`
+- `transform(X)`: return the fitted coefficient matrix `W`
+- `inverse_transform(W=None)`: reconstruct data from coefficients
+- `get_components()`: return the learned basis matrix `V`
+- `get_losses()`: return the tracked loss history
 
-General-purpose helpers.
+## Persistence Backends
 
-**Key Functions**:
-- `sparsity_score()`: Compute Hoyer sparsity measure
-- `svd_initialization()`: SVD-based NMF initialisation
-- `center_point_cloud()` / `center_point_cloud_torch()`: Center and normalise point clouds
-- `compute_periodicity_score()`: Compute periodicity from persistence
-- `compute_persistence_diagram()`: Full persistence diagram computation
+- `GudhiVietorisRipsComplex`: default backend for point clouds and embedded time series
+- `TimeDelayEmbeddingTorch`: differentiable time-delay embedding layer for 1-D signals
+- `CubicalComplex`: persistence on 2-D or 3-D structured tensors
+- `GraphFiltrationPH`: persistence on edge-weighted graph filtrations
 
-### `persistence/`
+Use `data_shape=(H, W)` for images and pass `complex_inputs={"all_edges": edge_list}` for graph data.
 
-Persistence computation backends sharing a unified `PersistenceInfo` named-tuple.
+## Loss Functions and Utilities
 
-- **`cubical.py`** -- `CubicalComplex`: differentiable persistence for 2-D/3-D grids (requires cripser)
-- **`rips.py`** -- `GudhiVietorisRipsComplex`: Vietoris-Rips complex; `TimeDelayEmbeddingTorch`: differentiable time-delay embedding
-- **`graph.py`** -- `GraphFiltrationPH`: persistence on edge-weighted graph filtrations
+Key exported loss functions:
 
-### `visualization.py`
+- `ph_sparsity_loss`
+- `target_diagram_loss`
+- `weighted_persistence_loss`
+- `clique_deviation_loss`
+- `total_variation`
 
-Plotting utilities and live training callback.
+Useful helpers:
 
-**Key Functions**:
-- `plot_gallery()`: Plot multiple signals/images in a grid
-- `plot_persistence_diagrams()`: Plot persistence diagrams
-- `plot_loss()`: Plot training loss curves
-- `plot_time_series_comparison()`: Compare original vs reconstructed
-- `plot_fourier_spectrum()`: Plot Fourier spectra
-- `plot_gallery_graph()`: Visualise graph basis vectors
-- `plot_PD_graph()`: Plot persistence diagrams for graphs
+- `sparsity_score`
+- `svd_initialization`
+- `center_point_cloud`
+- `center_point_cloud_torch`
+- `compute_periodicity_score`
+- `compute_persistence_diagram`
+- `generate_signals`
+- `generate_ichimatsu_pattern`
+- `generate_edge_weighted_graph`
+- `normalize_signals`
 
-**Key Class**: `FitMonitor` -- live visualisation callback for `TopologicalNMF.fit()`
+## Visualisation
 
-### `signal_generation.py`
+`FitMonitor` provides live plots during `fit()` and is intended for IPython or Jupyter environments.
 
-Synthetic signal generation for testing.
+```python
+from TopNMF import FitMonitor
 
-**Key Functions**:
-- `generate_signals()`: Cosine or triangle signals
-- `generate_mixed_periodic_nonperiodic()`: Mixed components
-- `generate_noisy_periodic()`: Noisy periodic signals
-- `normalize_signals()`: Signal normalisation
-- `generate_ichimatsu_pattern()`: Checkerboard pattern images
+monitor = FitMonitor(show=["loss", "basis", "PH"], interval=50, grid=(1, 3))
 
-## Key Parameters
+model.fit(X, n_iterations=500, lambda_top=1e-2, monitor=monitor)
+```
 
-### TopologicalNMF.fit()
+Additional plotting helpers are exported from `TopNMF`, including `plot_loss`, `plot_gallery`, `plot_persistence_diagrams`, `plot_time_series_comparison`, `plot_fourier_spectrum`, `plot_gallery_graph`, and `plot_PD_graph`.
 
-**Loss Weights**:
-- `lambda_apx`: Reconstruction loss weight (default: 1.0)
-- `lambda_top`: Topological loss weight (default: 0.001)
-- `lambda_spa_V`: Basis sparsity weight (default: 0.0)
-- `lambda_spa_W`: Coefficient sparsity weight (default: 0.0)
-- `lambda_tv`: Total variation weight (default: 0.0)
+## Examples and Development
 
-**Optimisation**:
-- `lr`: Learning rate (default: 0.005)
-- `n_iterations`: Maximum iterations (default: 1000)
-- `gd_iter`: Gradient descent steps per epoch (default: 1)
-- `mu_iter`: Multiplicative update steps per epoch (default: 0)
+Example notebooks:
 
-**Topological**:
-- `M`: Embedding dimension parameter (default: 4)
-- `tau`: Time delay (default: auto-computed)
-- `PH_dims`: Homology dimensions to use (default: [1])
-- `target_diagrams`: Target persistence diagrams
-- `target_periodicity`: Target periodicity scores
+- [`notebook/1DSignal.ipynb`](notebook/1DSignal.ipynb)
+- [`notebook/2DImage.ipynb`](notebook/2DImage.ipynb)
+- [`notebook/Edge-weighted_Graph.ipynb`](notebook/Edge-weighted_Graph.ipynb)
 
-**Visualisation**:
-- `monitor`: A `FitMonitor` instance for live plots (default: None)
+Run the test suite with:
 
-## License
+```bash
+pytest
+```
+
+## Repository Layout
+
+```text
+TopNMF/
+├── TopNMF/
+│   ├── __init__.py
+│   ├── model.py
+│   ├── losses.py
+│   ├── optim.py
+│   ├── utils.py
+│   ├── signal_generation.py
+│   ├── visualization.py
+│   └── persistence/
+│       ├── __init__.py
+│       ├── cubical.py
+│       ├── graph.py
+│       └── rips.py
+├── tests/
+├── notebook/
+├── pyproject.toml
+└── README.md
+```
+
+## Licence
 
 MIT

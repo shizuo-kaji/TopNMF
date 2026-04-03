@@ -254,7 +254,7 @@ class TopologicalNMF:
             if target_sparsity is not None:
                 loss_spa_v += (sparsity_score(component) - target_sparsity) ** 2
             else:
-                loss_spa_v += component.abs().sum() ** 2 / (component ** 2).sum()
+                loss_spa_v += component.abs().sum() ** 2 / ((component ** 2).sum() + 1e-10)
 
             sp_score += sparsity_score(component)
 
@@ -263,7 +263,8 @@ class TopologicalNMF:
 
     def _compute_w_sparsity_loss(self):
         loss = torch.sum(
-            torch.sum(torch.abs(self.W), dim=1) ** 2 / torch.sum(self.W ** 2, dim=1))
+            torch.sum(torch.abs(self.W), dim=1) ** 2 / (torch.sum(self.W ** 2, dim=1) + 1e-10)
+)
         return loss / float(self.n_components)
 
     def _record_losses(self, loss_ph, loss_apx, loss_spa_v, loss_spa_w, optimizer):

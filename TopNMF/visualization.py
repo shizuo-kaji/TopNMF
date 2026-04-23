@@ -422,28 +422,45 @@ class FitMonitor:
     show : list of str, optional
         Which plots to display: 'loss', 'basis', 'PH'.
     interval : int
-        Initial display interval in epochs (grows by 1.2x each update).
+        Initial display interval in epochs (grows by a factor each update).
     grid : tuple of (int, int)
         ``(n_row, n_col)`` for basis and PH grids.
     PHmode : str
         'T' or 'V' for persistence diagram computation.
     superlevel : bool
         Whether to use superlevel set filtration for PH plots.
+    save_video : str, optional
+        File path for saving a video of the training progress (e.g.
+        ``"training.mp4"`` or ``"training.gif"``).  Frames are captured at
+        every update step and written by calling :meth:`finish` after
+        ``fit()`` completes.  Requires ``show`` to list at least one panel.
+        Uses *imageio* when available, otherwise falls back to
+        ``matplotlib.animation`` (FFmpeg for ``.mp4``/``.avi``, Pillow for
+        ``.gif``).
+    fps : int
+        Frames per second for the saved video (default 5).
 
     Examples
     --------
     >>> from TopNMF.visualization import FitMonitor
     >>> monitor = FitMonitor(show=['loss', 'basis'], interval=50, grid=(2, 3))
     >>> model.fit(X, ..., monitor=monitor)
+
+    >>> # Save a video of the basis vectors evolving during training
+    >>> monitor = FitMonitor(show=['basis'], interval=50, save_video='train.mp4', fps=5)
+    >>> model.fit(X, ..., monitor=monitor)
+    >>> monitor.finish()
     """
 
-    def __init__(self, show=None, interval=100, grid=(2, 3),
-                 PHmode='T', superlevel=False):
+    def __init__(self, show=None, interval=100, factor=1.2, grid=(2, 3),
+                 PHmode='T', superlevel=False, save_video=False, plot_size=1.0):
         self.show = list(show or [])
         self.interval = interval
         self.grid = grid
         self.PHmode = PHmode
         self.superlevel = superlevel
+        self.save_video = save_video
+        self.plot_size = plot_size
 
         # Set during setup()
         self._n_features = None
@@ -453,6 +470,7 @@ class FitMonitor:
         self._data_shape = None
         self._use_embedding = False
         self._current_interval = interval
+        self._factor = factor
 
         # Display handles
         self._fig_loss = None
@@ -465,6 +483,9 @@ class FitMonitor:
         self._ax_ph = None
         self._disp_ph = None
 
+        # Video frame buffer (per panel)
+        self._frames: dict = {'loss': [], 'basis': [], 'PH': []}
+
     def setup(self, *, n_features, embedding_dim, tau, complex_inputs=None,
               data_shape=None, use_embedding=False):
         """Initialise figures and display handles. Called once by ``fit()``."""
@@ -476,10 +497,11 @@ class FitMonitor:
         self._use_embedding = use_embedding
         self._current_interval = self.interval
 
-        if not self.show:
+        if not self.show and not self.save_video:
             return
 
-        if not _IPYTHON_AVAILABLE:
+        use_display = _IPYTHON_AVAILABLE and bool(self.show)
+        if self.show and not _IPYTHON_AVAILABLE:
             print("Warning: show requires IPython/Jupyter. Plots disabled.")
             self.show = []
             return
@@ -488,21 +510,88 @@ class FitMonitor:
 
         if 'loss' in self.show:
             self._fig_loss, self._ax_loss = plt.subplots(1, 1, figsize=(8, 5))
-            self._disp_loss = display(self._fig_loss, display_id=True)
+            if use_display:
+                self._disp_loss = display(self._fig_loss, display_id=True)
 
         if 'basis' in self.show:
             self._fig_basis, self._ax_basis = plt.subplots(
-                n_row, n_col, figsize=(2.0 * n_col, 2.26 * n_row))
-            self._disp_basis = display(self._fig_basis, display_id=True)
+                n_row, n_col, figsize=(2.0 * n_col*self.plot_size, 2.26 * n_row*self.plot_size))
+            if use_display:
+                self._disp_basis = display(self._fig_basis, display_id=True)
 
         if 'PH' in self.show:
             self._fig_ph, self._ax_ph = plt.subplots(
                 n_row, n_col, figsize=(2.0 * n_col, 2.26 * n_row), squeeze=False)
-            self._disp_ph = display(self._fig_ph, display_id=True)
+            if use_display:
+                self._disp_ph = display(self._fig_ph, display_id=True)
+
+
+    @staticmethod
+    def _tile_frames(frame_lists: List[List[np.ndarray]]) -> List[np.ndarray]:
+        """Tile per-panel frame lists horizontally into a single list of frames."""
+        n = min(len(fl) for fl in frame_lists)
+        result = []
+        for i in range(n):
+            parts = [fl[i] for fl in frame_lists]
+            if len(parts) == 1:
+                result.append(parts[0])
+                continue
+            max_h = max(f.shape[0] for f in parts)
+            padded = []
+            for f in parts:
+                if f.shape[0] < max_h:
+                    pad = np.full((max_h - f.shape[0], f.shape[1], 3), 255, dtype=np.uint8)
+                    f = np.vstack([f, pad])
+                padded.append(f)
+            result.append(np.hstack(padded))
+        return result
+
+    def save(self, path, show: Optional[List[str]] = None, fps=5):
+        """Write collected frames to *save_video*. Call once after ``fit()`` completes.
+
+        Parameters
+        ----------
+        show : list of str, optional
+            Panels to include in the video: any subset of ``['loss', 'basis', 'PH']``.
+            Defaults to all panels that have captured frames.
+        """
+        active = [p for p in (show if show is not None else self.show)
+                  if self._frames.get(p)]
+        if not active:
+            return
+
+        frames = self._tile_frames([self._frames[p] for p in active])
+        if not frames:
+            return
+
+        ext = path.rsplit('.', 1)[-1].lower() if '.' in path else 'mp4'
+
+        try:
+            import imageio
+            imageio.mimsave(path, frames, fps=fps)
+            print(f"Video saved: {path}")
+            return
+        except ImportError:
+            pass
+
+        import matplotlib.animation as manim
+        h, w = frames[0].shape[:2]
+        fig_tmp, ax_tmp = plt.subplots(figsize=(w / 100, h / 100))
+        ax_tmp.axis('off')
+        plt.subplots_adjust(0, 0, 1, 1)
+        ims = [[ax_tmp.imshow(f, animated=True)] for f in frames]
+        anim = manim.ArtistAnimation(fig_tmp, ims, interval=1000 // max(1, fps))
+        writer = (manim.PillowWriter(fps=fps) if ext == 'gif'
+                  else manim.FFMpegWriter(fps=fps))
+        anim.save(path, writer=writer)
+        plt.close(fig_tmp)
+        print(f"Video saved: {path}")
 
     def update(self, epoch, model):
         """Update plots for the current epoch. Called each epoch by ``fit()``."""
-        if not self.show:
+        if not self.show and not self.save_video:
+            return
+        if not self._fig_loss and not self._fig_basis and not self._fig_ph:
             return
 
         interval = max(1, int(self._current_interval))
@@ -519,11 +608,12 @@ class FitMonitor:
         else:
             V_display = V_np
 
-        if 'loss' in self.show and self._disp_loss is not None:
+        if 'loss' in self.show and self._fig_loss is not None:
             plot_loss(model.losses, ax=self._ax_loss)
-            self._disp_loss.update(self._fig_loss)
+            if self._disp_loss is not None:
+                self._disp_loss.update(self._fig_loss)
 
-        if 'basis' in self.show and self._disp_basis is not None:
+        if 'basis' in self.show and self._fig_basis is not None:
             if is_graph:
                 edge_list = self._complex_inputs['all_edges']
                 edge_index = torch.tensor(edge_list, dtype=torch.long).t().contiguous()
@@ -535,9 +625,10 @@ class FitMonitor:
                 plot_gallery(V_display, title='basis',
                              n_row=n_row, n_col=n_col,
                              axs=self._ax_basis)
-            self._disp_basis.update(self._fig_basis)
+            if self._disp_basis is not None:
+                self._disp_basis.update(self._fig_basis)
 
-        if 'PH' in self.show and self._disp_ph is not None:
+        if 'PH' in self.show and self._fig_ph is not None:
             if is_graph:
                 plot_PD_graph(
                     [V_np[i] for i in range(min(len(V_np), n_row * n_col))],
@@ -552,6 +643,23 @@ class FitMonitor:
                     superlevel=self.superlevel, PHmode=self.PHmode,
                     embedding_dim=self._embedding_dim, tau=tau, axs=self._ax_ph,
                     use_embedding=self._use_embedding)
-            self._disp_ph.update(self._fig_ph)
+            if self._disp_ph is not None:
+                self._disp_ph.update(self._fig_ph)
 
-        self._current_interval = max(1, int(1.2 * self._current_interval))
+        self._current_interval = max(1, int(self._factor * self._current_interval))
+
+        if self.save_video:
+            import io as _io
+            mapping = [('loss', self._fig_loss), ('basis', self._fig_basis), ('PH', self._fig_ph)]
+            for panel, fig in mapping:
+                if fig is None:
+                    continue
+                try:
+                    buf = _io.BytesIO()
+                    fig.savefig(buf, format='png')
+                    buf.seek(0)
+                    frame = plt.imread(buf)          # float32 [0,1], shape (H,W,3or4)
+                    frame = (np.clip(frame[..., :3], 0, 1) * 255).astype(np.uint8)
+                    self._frames[panel].append(frame)
+                except Exception:
+                    pass

@@ -41,6 +41,7 @@ dependencies = [
   "cripser>=0.0.24",
   "ripser>=0.6",
   "gudhi>=3.8",
+  "imageio-ffmpeg>=0.4.6",
 ]
 
 [project.optional-dependencies]

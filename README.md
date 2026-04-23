@@ -4,6 +4,11 @@ TopNMF is a Python library for non-negative matrix factorisation (NMF) with topo
 
 Written by Shizuo Kaji and Keunsu Kim.
 
+The animation below shows TopNMF learning 6 NMF basis images from 9 data samples using cubical-complex topological regularisation.
+
+![data](image/image2d.png)
+![2-D NMF basis learning](image/image2d.gif)
+
 ## What TopNMF Supports
 
 - 1-D signals with optional time-delay embedding and Vietoris-Rips persistence

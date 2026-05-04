@@ -152,6 +152,7 @@ Key exported loss functions:
 - `ph_sparsity_loss`
 - `target_diagram_loss`
 - `weighted_persistence_loss`
+- `weighted_total_squared_persistence_loss`
 - `clique_deviation_loss`
 - `total_variation`
 

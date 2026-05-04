@@ -6,8 +6,14 @@ import math
 import pytest
 
 from TopNMF.optim import sparse_opt, sparse_opt_hoyer, update_V
-from TopNMF.utils import sparsity_score, svd_initialization
-from TopNMF.losses import total_variation
+from TopNMF.utils import (
+    center_point_cloud,
+    center_point_cloud_torch,
+    sparsity_score,
+    svd_initialization,
+)
+from TopNMF.losses import total_variation, weighted_total_squared_persistence_loss
+from TopNMF.persistence import PersistenceInfo
 
 
 def test_sparse_opt_returns_input_when_k_nonpositive(np):
@@ -59,6 +65,40 @@ def test_svd_initialization_shapes_and_nonnegativity(np):
     assert np.all(v_matrix >= 0)
 
 
+def test_center_point_cloud_handles_constant_rows(np) -> None:
+    point_cloud = np.array(
+        [
+            [1.0, 1.0, 1.0],
+            [1.0, 2.0, 3.0],
+        ],
+        dtype=float,
+    )
+
+    centered = center_point_cloud(point_cloud)
+
+    assert np.isfinite(centered).all()
+    np.testing.assert_allclose(centered[0], np.zeros(3))
+
+
+def test_center_point_cloud_torch_handles_constant_rows(torch) -> None:
+    point_cloud = torch.tensor(
+        [
+            [1.0, 1.0, 1.0],
+            [1.0, 2.0, 3.0],
+        ],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+
+    centered = center_point_cloud_torch(point_cloud)
+    loss = centered.pow(2).sum()
+    loss.backward()
+
+    assert torch.isfinite(centered).all()
+    assert torch.isfinite(point_cloud.grad).all()
+    torch.testing.assert_close(centered[0], torch.zeros(3, dtype=torch.float64))
+
+
 def test_total_variation_matches_manual_computation(torch):
     values = torch.tensor([1.0, 4.0, 2.0], dtype=torch.float64)
     total_var = total_variation(values)
@@ -78,6 +118,52 @@ def test_total_variation_2d_matches_manual_computation(torch):
     # sqrt(3) + sqrt(18)
     expected = math.sqrt(3) + math.sqrt(18)
     assert float(total_var) == pytest.approx(expected, rel=1e-6)
+
+
+def test_weighted_total_squared_persistence_loss_matches_formula(torch):
+    diagram = torch.tensor(
+        [
+            [0.2, 0.5],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float64,
+    )
+
+    loss = weighted_total_squared_persistence_loss(
+        [diagram],
+        PH_dims=[0],
+        device="cpu",
+        p=2.0,
+    )
+
+    expected = (1.0 - 0.5) ** 2 * (0.5 - 0.2) ** 2
+    expected += (1.0 - 0.9) ** 2 * (0.9 - 0.1) ** 2
+    assert float(loss) == pytest.approx(expected)
+
+
+def test_weighted_total_squared_persistence_loss_ignores_infinite_pairs(torch):
+    diagram = torch.tensor(
+        [
+            [0.2, 0.5],
+            [0.0, float("inf")],
+        ],
+        dtype=torch.float64,
+    )
+    persistence = PersistenceInfo(
+        diagram=diagram,
+        pairing=torch.empty((2, 2), dtype=torch.long),
+        dimension=0,
+    )
+
+    loss = weighted_total_squared_persistence_loss(
+        [persistence],
+        PH_dims=[0],
+        device="cpu",
+        p=2.0,
+    )
+
+    expected = (1.0 - 0.5) ** 2 * (0.5 - 0.2) ** 2
+    assert float(loss) == pytest.approx(expected)
 
 
 def test_update_v_returns_finite_nonnegative_tensor(torch):

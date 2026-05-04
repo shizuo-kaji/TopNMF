@@ -239,13 +239,15 @@ class TopologicalNMF:
             component = self.V[idx]
 
             if apply_topology:
-                diagrams = self._compute_component_diagrams(
-                    component, embedder, ph_complex, complex_inputs)
-                if target_diagrams is not None:
-                    loss_ph += self.ph_loss_fn(
-                        diagrams, PH_dims, target_diagrams, self.device,
-                        **self.ph_loss_params)
                 target_val = self._resolve_periodicity_target(target_periodicity, idx)
+                needs_diagram = target_diagrams is not None or target_val is not None
+                if needs_diagram:
+                    diagrams = self._compute_component_diagrams(
+                        component, embedder, ph_complex, complex_inputs)
+                    if target_diagrams is not None:
+                        loss_ph += self.ph_loss_fn(
+                            diagrams, PH_dims, target_diagrams, self.device,
+                            **self.ph_loss_params)
                 if target_val is not None:
                     loss_ph += self._compute_periodicity_loss(
                         diagrams, PH_dims, target_val, self.device)

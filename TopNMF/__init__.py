@@ -11,6 +11,7 @@ from .losses import (
     ph_sparsity_loss,
     target_diagram_loss,
     weighted_persistence_loss,
+    weighted_total_squared_persistence_loss,
     total_variation,
     clique_deviation_loss,
 )
@@ -68,6 +69,7 @@ __all__ = [
     'ph_sparsity_loss',
     'target_diagram_loss',
     'weighted_persistence_loss',
+    'weighted_total_squared_persistence_loss',
     'clique_deviation_loss',
     'total_variation',
     # Optimization

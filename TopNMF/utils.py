@@ -61,21 +61,23 @@ def svd_initialization(X: np.ndarray, n_components: int) -> tuple[np.ndarray, np
 # Point-cloud centring
 # ---------------------------------------------------------------------------
 
-def center_point_cloud(X: np.ndarray) -> np.ndarray:
+def center_point_cloud(X: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     """Centre and normalise a NumPy point cloud (project perpendicular to all-ones, then L2-normalise)."""
-    one = np.ones(X.shape[1])
+    one = np.ones(X.shape[1], dtype=X.dtype)
     projection = (X @ one) / (one @ one)
     centered = X - np.outer(projection, one)
-    return centered / np.linalg.norm(centered, axis=1, keepdims=True)
+    norms = np.linalg.norm(centered, axis=1, keepdims=True)
+    return np.divide(centered, norms, out=np.zeros_like(centered), where=norms > eps)
 
 
-def center_point_cloud_torch(X: torch.Tensor) -> torch.Tensor:
+def center_point_cloud_torch(X: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
     """Centre and normalise a PyTorch point cloud (differentiable)."""
     device = X.device
-    one = torch.ones(X.shape[1], device=device)
+    one = torch.ones(X.shape[1], dtype=X.dtype, device=device)
     projection = (X @ one) / (one @ one)
     centered = X - projection.unsqueeze(1) * one.unsqueeze(0)
-    return centered / torch.norm(centered, dim=1, keepdim=True)
+    norms = torch.norm(centered, dim=1, keepdim=True).clamp_min(eps)
+    return centered / norms
 
 
 # ---------------------------------------------------------------------------

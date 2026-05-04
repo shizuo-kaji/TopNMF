@@ -176,6 +176,60 @@ def weighted_persistence_loss(diagrams: List, PH_dims: List[int],
     return loss
 
 
+def weighted_total_squared_persistence_loss(
+    diagrams: List,
+    PH_dims: List[int],
+    target_diagrams: Optional[List] = None,
+    device: str = 'cpu',
+    p: float = 2.0,
+) -> torch.Tensor:
+    """
+    Weighted total squared persistence loss.
+
+    Computes
+    ``sum_{(b, d) in PH_k^fin} (1 - d)^p (d - b)^2``
+    over the requested homology dimensions. The ``target_diagrams`` argument is
+    ignored and kept for compatibility with :class:`TopologicalNMF`.
+
+    Parameters
+    ----------
+    diagrams : List
+        List of persistence diagrams from a complex.
+    PH_dims : List[int]
+        Homology dimensions to consider.
+    target_diagrams : Optional[List]
+        Not used (kept for signature compatibility).
+    device : str
+        Computing device.
+    p : float
+        Death-value weight exponent. ``p=2`` gives :math:`WTP_2^{(k)}`.
+
+    Returns
+    -------
+    torch.Tensor
+        Total weighted squared persistence over finite intervals.
+    """
+    loss = torch.tensor(0., device=device)
+
+    for dim in PH_dims:
+        if dim >= len(diagrams):
+            continue
+        D = diagrams[dim].diagram if hasattr(diagrams[dim], 'diagram') else diagrams[dim]
+        if D is None or D.shape[0] == 0:
+            continue
+
+        finite_mask = torch.isfinite(D).all(dim=1)
+        if not finite_mask.any():
+            continue
+        D = D[finite_mask]
+
+        births = D[:, 0]
+        deaths = D[:, 1]
+        loss += ((1.0 - deaths).pow(p) * (deaths - births).pow(2)).sum()
+
+    return loss
+
+
 def clique_deviation_loss(diags: List, PH_dims: List[int], target_PH: List,
                           device: str, alpha: float = 1.0,
                           remove_longest: Optional[Dict[int, bool]] = None) -> torch.Tensor:

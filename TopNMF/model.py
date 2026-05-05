@@ -1,6 +1,6 @@
 """TopologicalNMF: NMF with topological constraints via persistent homology."""
 
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -12,6 +12,8 @@ from .losses import ph_sparsity_loss, total_variation
 from .optim import update_V
 from .utils import sparsity_score, center_point_cloud_torch
 from .persistence import TimeDelayEmbeddingTorch, GudhiVietorisRipsComplex
+
+PeriodicityTarget = Optional[Union[float, Sequence[Optional[float]]]]
 
 
 class TopologicalNMF:
@@ -181,28 +183,76 @@ class TopologicalNMF:
         return ph_complex(component_input)
 
     @staticmethod
-    def _resolve_periodicity_target(target_periodicity, component_idx):
+    def _coerce_periodicity_targets(
+        target_periodicity: PeriodicityTarget,
+        n_components: int,
+    ) -> Optional[List[Optional[float]]]:
         if target_periodicity is None:
             return None
-        if hasattr(target_periodicity, "__getitem__") and not isinstance(target_periodicity, str):
+
+        if isinstance(target_periodicity, str):
+            return [float(target_periodicity)] * n_components
+
+        try:
+            raw_targets = list(target_periodicity)
+        except TypeError:
+            return [float(target_periodicity)] * n_components
+
+        targets: List[Optional[float]] = []
+        for value in raw_targets[:n_components]:
+            if value is None:
+                targets.append(None)
+                continue
             try:
-                return float(target_periodicity[component_idx])
-            except (IndexError, TypeError, ValueError):
-                return None
-        return float(target_periodicity)
+                targets.append(float(value))
+            except (TypeError, ValueError):
+                targets.append(None)
+
+        targets.extend([None] * (n_components - len(targets)))
+        return targets
 
     @staticmethod
-    def _compute_periodicity_loss(diagrams, PH_dims, target_value, device):
+    def _match_periodicity_targets_by_rank(
+        periodicity_scores: List[torch.Tensor],
+        targets: List[Optional[float]],
+    ) -> List[Optional[float]]:
+        score_order = sorted(
+            range(len(periodicity_scores)),
+            key=lambda idx: float(periodicity_scores[idx].detach().cpu()),
+        )
+        target_order = sorted(
+            range(len(targets)),
+            key=lambda idx: 0.5 if targets[idx] is None else targets[idx],
+        )
+
+        matched_targets: List[Optional[float]] = [None] * len(targets)
+        for rank, target_idx in enumerate(target_order):
+            target_value = targets[target_idx]
+            if target_value is not None:
+                matched_targets[score_order[rank]] = target_value
+        return matched_targets
+
+    @staticmethod
+    def _compute_periodicity_score(
+        diagrams: List[object],
+        PH_dims: List[int],
+        device: str,
+    ) -> torch.Tensor:
         pd = torch.cat([
             diagrams[dim].diagram if hasattr(diagrams[dim], "diagram") else diagrams[dim]
             for dim in PH_dims
         ])
         persistence = torch.diff(pd, dim=1).reshape(-1)
         if len(persistence) > 0:
-            score = torch.max(persistence) / np.sqrt(3)
-        else:
-            score = torch.tensor(0.0, device=device)
-        return (score - target_value) ** 2
+            return torch.max(persistence) / np.sqrt(3)
+        return torch.tensor(0.0, device=device)
+
+    @staticmethod
+    def _compute_periodicity_loss(
+        periodicity_score: torch.Tensor,
+        target_value: float,
+    ) -> torch.Tensor:
+        return (periodicity_score - target_value) ** 2
 
     # ------------------------------------------------------------------
     # Per-epoch computation
@@ -235,12 +285,20 @@ class TopologicalNMF:
         loss_tv_v = torch.tensor(0.0, device=self.device)
 
         apply_topology = lambda_top > 0 and epoch >= start_epoch_topological
+        periodicity_targets = self._coerce_periodicity_targets(
+            target_periodicity, self.n_components)
+        compute_periodicity = (
+            apply_topology
+            and periodicity_targets is not None
+            and any(target is not None for target in periodicity_targets)
+        )
+        periodicity_scores: List[Optional[torch.Tensor]] = [None] * self.n_components
+
         for idx in range(self.n_components):
             component = self.V[idx]
 
             if apply_topology:
-                target_val = self._resolve_periodicity_target(target_periodicity, idx)
-                needs_diagram = target_diagrams is not None or target_val is not None
+                needs_diagram = target_diagrams is not None or compute_periodicity
                 if needs_diagram:
                     diagrams = self._compute_component_diagrams(
                         component, embedder, ph_complex, complex_inputs)
@@ -248,9 +306,9 @@ class TopologicalNMF:
                         loss_ph += self.ph_loss_fn(
                             diagrams, PH_dims, target_diagrams, self.device,
                             **self.ph_loss_params)
-                if target_val is not None:
-                    loss_ph += self._compute_periodicity_loss(
-                        diagrams, PH_dims, target_val, self.device)
+                    if compute_periodicity:
+                        periodicity_scores[idx] = self._compute_periodicity_score(
+                            diagrams, PH_dims, self.device)
 
             loss_tv_v += total_variation(component)
             if target_sparsity is not None:
@@ -259,6 +317,17 @@ class TopologicalNMF:
                 loss_spa_v += component.abs().sum() ** 2 / ((component ** 2).sum() + 1e-10)
 
             sp_score += sparsity_score(component)
+
+        if compute_periodicity:
+            scores = [score for score in periodicity_scores if score is not None]
+            matched_targets = self._match_periodicity_targets_by_rank(
+                scores, periodicity_targets)
+            for idx, target_value in enumerate(matched_targets):
+                if target_value is not None:
+                    score = periodicity_scores[idx]
+                    if score is None:
+                        continue
+                    loss_ph += self._compute_periodicity_loss(score, target_value)
 
         norm = float(self.n_components)
         return loss_ph / norm, loss_spa_v / norm, sp_score / norm, loss_tv_v
@@ -310,7 +379,7 @@ class TopologicalNMF:
         weight_decay: float = 0.0,
         target_sparsity: Optional[float] = None,
         target_diagrams: Optional[List] = None,
-        target_periodicity: Optional[float] = None,
+        target_periodicity: PeriodicityTarget = None,
         gd_iter: int = 1,
         mu_iter: int = 0,
         W_iter: int = 0,
@@ -351,8 +420,9 @@ class TopologicalNMF:
             Target Hoyer sparsity for V.
         target_diagrams : list, optional
             Target persistence diagrams per dimension.
-        target_periodicity : float, optional
-            Target periodicity score.
+        target_periodicity : float or sequence of float, optional
+            Target periodicity score. Sequence targets are sorted and matched to
+            basis components sorted by their current periodicity score.
         gd_iter : int
             Gradient-descent steps per epoch.
         mu_iter : int

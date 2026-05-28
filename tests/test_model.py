@@ -22,6 +22,35 @@ class _PeriodicityComplex:
         return [empty, diagram]
 
 
+def test_transform_recomputes_W_for_new_X(np) -> None:
+    matrix = np.array(
+        [
+            [1.0, 0.8, 0.2, 0.1],
+            [0.9, 0.7, 0.3, 0.2],
+            [0.2, 0.1, 0.8, 1.0],
+        ],
+        dtype=float,
+    )
+    model = TopologicalNMF(n_components=2, random_state=0, use_embedding=False)
+    model.fit(
+        matrix,
+        n_iterations=50,
+        lambda_top=0.0,
+        init_method="random",
+        scheduler_cls=None,
+        verbose=False,
+    )
+
+    new_X = matrix[:2]
+    W = model.transform(new_X)
+    assert W.shape == (2, 2)
+    assert np.all(W >= 0)
+    assert np.isfinite(W).all()
+
+    with pytest.raises(ValueError):
+        model.transform(np.zeros((2, 99)))
+
+
 def test_fit_skips_periodicity_none_components(np) -> None:
     matrix = np.array(
         [

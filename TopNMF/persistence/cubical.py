@@ -2,7 +2,7 @@
 
 import numpy as np
 import torch
-from typing import List
+from typing import List, Optional
 
 import cripser
 
@@ -25,7 +25,7 @@ class CubicalComplex(torch.nn.Module):
         Maximum homology dimension.
     """
 
-    def __init__(self, superlevel: bool = False, mode: str = 'T', dim: int = None):
+    def __init__(self, superlevel: bool = False, mode: str = 'T', dim: Optional[int] = None):
         super().__init__()
         self.superlevel = superlevel
         if mode not in ['T', 'V']:

@@ -66,6 +66,26 @@ class GudhiVietorisRipsComplex:
         self.p = p
         self.max_edge_length = max_edge_length
 
+    def _extract_indices(self, gens, h_dim: int, device) -> torch.Tensor:
+        """Pull the generator index array for homology dimension ``h_dim``.
+
+        ``flag_persistence_generators()`` returns
+        ``(dim0_finite (n,3), [dim>=1 arrays (n,4)], dim0_essential, [essential higher])``.
+        Essential (infinite) H0 generators (``gens[2]``) are intentionally
+        dropped here; infinite deaths in finite bars are handled below.
+        """
+        if h_dim == 0:
+            arr = gens[0]
+            cols = 3
+        else:
+            higher = gens[1] if len(gens) > 1 else []
+            arr = higher[h_dim - 1] if h_dim - 1 < len(higher) else None
+            cols = 4
+
+        if arr is None or np.size(arr) == 0:
+            return torch.empty((0, cols), dtype=torch.long, device=device)
+        return torch.as_tensor(np.asarray(arr), dtype=torch.long, device=device)
+
     def __call__(self, point_cloud: torch.Tensor) -> List[PersistenceInfo]:
         points_np = point_cloud.detach().cpu().numpy()
         rips = (
@@ -79,48 +99,31 @@ class GudhiVietorisRipsComplex:
 
         result: List[PersistenceInfo] = []
         for h_dim in range(self.dim + 1):
-            # Extract generator indices
-            if isinstance(gens[h_dim], list):
-                if len(gens[h_dim]) > 0:
-                    indices = torch.tensor(gens[h_dim][0], dtype=torch.long, device=point_cloud.device)
-                else:
-                    indices = torch.empty((0, 4), dtype=torch.long, device=point_cloud.device)
-            elif isinstance(gens[h_dim], np.ndarray):
-                if gens[h_dim].size > 0:
-                    indices = torch.tensor(gens[h_dim], dtype=torch.long, device=point_cloud.device)
-                else:
-                    # Default to 3 columns for H0, though it could be 4 for others if empty
-                    indices = torch.empty((0, 3 if h_dim == 0 else 4), dtype=torch.long, device=point_cloud.device)
-            else:
-                 indices = torch.empty((0, 4), dtype=torch.long, device=point_cloud.device)
+            indices = self._extract_indices(gens, h_dim, point_cloud.device)
 
             if indices.shape[0] == 0:
                 result.append(PersistenceInfo(
                     diagram=torch.empty((0, 2), dtype=point_cloud.dtype,
                                         device=point_cloud.device),
-                    pairing=torch.empty((0, 0), dtype=torch.long,
+                    pairing=torch.empty((0, indices.shape[1]), dtype=torch.long,
                                         device=point_cloud.device),
                     dimension=h_dim,
                 ))
                 continue
 
-            # Compute persistence values from indices
+            # Compute persistence values from generator indices.
             if indices.shape[1] == 4:
                 birth_death = torch.norm(
                     point_cloud[indices[:, (0, 2)]] - point_cloud[indices[:, (1, 3)]],
                     dim=-1
                 )
-            elif indices.shape[1] == 3:
-                 deaths = torch.norm(
-                     point_cloud[indices[:, 1]] - point_cloud[indices[:, 2]],
-                     dim=-1
-                 )
-                 births = torch.zeros_like(deaths)
-                 birth_death = torch.stack([births, deaths], dim=1)
-            else:
-                 # Unexpected shape
-                 raise ValueError(f"Unexpected generator shape for dim {h_dim}: {indices.shape}")
-
+            else:  # 3 columns: H0 finite bars born at filtration 0.
+                deaths = torch.norm(
+                    point_cloud[indices[:, 1]] - point_cloud[indices[:, 2]],
+                    dim=-1
+                )
+                births = torch.zeros_like(deaths)
+                birth_death = torch.stack([births, deaths], dim=1)
 
             deaths = birth_death[:, 1].clone()  # Clone to avoid in-place issues
             finite_deaths = deaths[torch.isfinite(deaths)]

@@ -11,6 +11,9 @@ from TopNMF.utils import (
     center_point_cloud_torch,
     sparsity_score,
     svd_initialization,
+    l1_l2_sq_ratio,
+    periodicity_from_diagram,
+    SQRT3,
 )
 from TopNMF.losses import total_variation, weighted_total_squared_persistence_loss
 from TopNMF.persistence import PersistenceInfo
@@ -46,6 +49,34 @@ def test_sparsity_score_orders_dense_and_sparse_vectors(torch):
 
     assert sparsity_score(dense) == pytest.approx(0.0, abs=1e-7)
     assert sparsity_score(sparse_vec) == pytest.approx(1.0, abs=1e-7)
+
+
+def test_sparsity_score_zero_vector_is_finite(torch):
+    zero = torch.zeros(4, dtype=torch.float64)
+    score = sparsity_score(zero)
+    assert math.isfinite(score)
+
+
+def test_l1_l2_sq_ratio_bounds(torch):
+    one_hot = torch.tensor([0.0, 3.0, 0.0, 0.0], dtype=torch.float64)
+    uniform = torch.ones(4, dtype=torch.float64)
+    assert float(l1_l2_sq_ratio(one_hot)) == pytest.approx(1.0, abs=1e-6)
+    assert float(l1_l2_sq_ratio(uniform)) == pytest.approx(4.0, abs=1e-6)
+
+
+def test_l1_l2_sq_ratio_rowwise(torch):
+    matrix = torch.tensor([[0.0, 2.0], [1.0, 1.0]], dtype=torch.float64)
+    rowwise = l1_l2_sq_ratio(matrix, dim=1)
+    assert rowwise.shape == (2,)
+    assert float(rowwise[0]) == pytest.approx(1.0, abs=1e-6)
+    assert float(rowwise[1]) == pytest.approx(2.0, abs=1e-6)
+
+
+def test_periodicity_from_diagram_matches_sqrt3_normalisation(torch):
+    diagram = torch.tensor([[0.0, SQRT3], [0.1, 0.2]], dtype=torch.float64)
+    assert float(periodicity_from_diagram(diagram)) == pytest.approx(1.0, abs=1e-6)
+    empty = torch.empty((0, 2), dtype=torch.float64)
+    assert float(periodicity_from_diagram(empty)) == pytest.approx(0.0)
 
 
 def test_svd_initialization_shapes_and_nonnegativity(np):
@@ -133,7 +164,7 @@ def test_weighted_total_squared_persistence_loss_matches_formula(torch):
         [diagram],
         PH_dims=[0],
         device="cpu",
-        p=2.0,
+        power=2.0,
     )
 
     expected = (1.0 - 0.5) ** 2 * (0.5 - 0.2) ** 2
@@ -159,7 +190,7 @@ def test_weighted_total_squared_persistence_loss_ignores_infinite_pairs(torch):
         [persistence],
         PH_dims=[0],
         device="cpu",
-        p=2.0,
+        power=2.0,
     )
 
     expected = (1.0 - 0.5) ** 2 * (0.5 - 0.2) ** 2

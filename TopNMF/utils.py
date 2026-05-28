@@ -2,31 +2,64 @@
 
 import numpy as np
 import torch
-from typing import Union
+from typing import Optional, Union
 
 from gudhi.point_cloud.timedelay import TimeDelayEmbedding
-from ripser import ripser
+
+# Maximum H1 persistence of a perfectly circular point cloud after centring and
+# L2-normalisation; used to map periodicity scores into [0, 1].
+SQRT3 = float(np.sqrt(3.0))
 
 
-def sparsity_score(v: torch.Tensor) -> Union[float, torch.Tensor]:
+def l1_l2_sq_ratio(x: torch.Tensor, dim: Optional[int] = None,
+                   eps: float = 1e-10) -> torch.Tensor:
+    """
+    Ratio ``(sum |x|)^2 / (sum x^2 + eps)`` of a tensor.
+
+    This quantity ranges from 1 (a single non-zero entry) to ``n`` (all entries
+    equal) and underlies several sparsity-related losses in the package.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Input tensor.
+    dim : int, optional
+        Reduction dimension. If None, reduce over all elements and return a
+        scalar; otherwise reduce along ``dim`` and return one value per slice.
+    eps : float
+        Numerical stability constant added to the denominator.
+
+    Returns
+    -------
+    torch.Tensor
+        The L1^2 / L2^2 ratio.
+    """
+    l1_sq = x.abs().sum(dim=dim) ** 2
+    l2_sq = (x ** 2).sum(dim=dim)
+    return l1_sq / (l2_sq + eps)
+
+
+def sparsity_score(v: torch.Tensor, eps: float = 1e-10) -> Union[float, torch.Tensor]:
     """
     Hoyer sparsity score in [0, 1] (0 = dense, 1 = maximally sparse).
 
     Parameters
     ----------
     v : torch.Tensor
-        Input vector
+        Input vector.
+    eps : float
+        Numerical stability constant (avoids 0/0 for all-zero vectors).
 
     Returns
     -------
     float or torch.Tensor
         Sparsity score. Returns a tensor when ``v`` requires gradients.
     """
-    n = len(v.ravel())
+    n = v.numel()
     l1_norm = v.abs().sum()
     l2_norm = (v ** 2).sum().sqrt()
 
-    score = (np.sqrt(n) - l1_norm / l2_norm) / (np.sqrt(n) - 1)
+    score = (np.sqrt(n) - l1_norm / (l2_norm + eps)) / (np.sqrt(n) - 1)
     if score.requires_grad:
         return score
     return float(score.item())
@@ -81,42 +114,76 @@ def center_point_cloud_torch(X: torch.Tensor, eps: float = 1e-12) -> torch.Tenso
 
 
 # ---------------------------------------------------------------------------
-# Persistence helpers (NumPy / offline)
+# Persistence helpers
 # ---------------------------------------------------------------------------
 
-def compute_persistence_diagram(signal: np.ndarray, dim: int = 30,
+def periodicity_from_diagram(diagram: Union[torch.Tensor, object],
+                             eps: float = 1e-12) -> torch.Tensor:
+    """
+    Periodicity score: ``max(death - birth) / sqrt(3)`` over a persistence diagram.
+
+    Parameters
+    ----------
+    diagram : torch.Tensor or PersistenceInfo
+        Birth-death pairs of shape (n, 2), or an object exposing a ``diagram``
+        attribute (e.g. :class:`~TopNMF.persistence.PersistenceInfo`).
+    eps : float
+        Unused placeholder kept for signature symmetry with other helpers.
+
+    Returns
+    -------
+    torch.Tensor
+        Scalar periodicity score (0 if the diagram is empty).
+    """
+    pd = diagram.diagram if hasattr(diagram, "diagram") else diagram
+    if pd.shape[0] == 0:
+        return torch.zeros((), dtype=pd.dtype, device=pd.device)
+    persistence = (pd[:, 1] - pd[:, 0])
+    return persistence.max() / SQRT3
+
+
+def compute_persistence_diagram(signal: np.ndarray, embedding_dim: int = 30,
                                 tau: int = 1, max_dim: int = 1) -> dict:
     """
-    Compute persistence diagram for a 1-D signal via time-delay embedding.
+    Compute persistence diagrams for a 1-D signal via time-delay embedding.
+
+    Uses :class:`~TopNMF.persistence.GudhiVietorisRipsComplex` as the single
+    persistence backend (shared with training and visualisation).
 
     Parameters
     ----------
     signal : np.ndarray
-        1D time series signal
-    dim : int
-        Embedding dimension
+        1-D time-series signal.
+    embedding_dim : int
+        Number of delayed copies in the time-delay embedding.
     tau : int
-        Time delay
+        Time delay.
     max_dim : int
-        Maximum homology dimension
+        Maximum homology dimension.
 
     Returns
     -------
     dict
-        Keys: 'dgms' (list of diagrams), 'embedded', 'centered'.
+        Keys: 'dgms' (list of (n, 2) NumPy birth-death arrays per dimension),
+        'embedded', 'centered'.
     """
-    embedder = TimeDelayEmbedding(dim=dim, delay=tau)
-    embedded = embedder(signal)
+    from .persistence import GudhiVietorisRipsComplex
+
+    embedder = TimeDelayEmbedding(dim=embedding_dim, delay=tau)
+    embedded = np.asarray(embedder(signal))
     centered = center_point_cloud(embedded)
-    result = ripser(centered, maxdim=max_dim)
+
+    complex_fn = GudhiVietorisRipsComplex(dim=max_dim, p=2)
+    pers_info = complex_fn(torch.as_tensor(centered, dtype=torch.float))
+    dgms = [info.diagram.detach().cpu().numpy() for info in pers_info]
     return {
-        'dgms': result['dgms'],
+        'dgms': dgms,
         'embedded': embedded,
         'centered': centered,
     }
 
 
-def compute_periodicity_score(signal: np.ndarray, dim: int = 30,
+def compute_periodicity_score(signal: np.ndarray, embedding_dim: int = 30,
                               tau: int = 1, max_dim: int = 1) -> float:
     """
     Periodicity score in [0, 1] from max H1 persistence normalised by sqrt(3).
@@ -124,22 +191,23 @@ def compute_periodicity_score(signal: np.ndarray, dim: int = 30,
     Parameters
     ----------
     signal : np.ndarray
-        1D time series signal
-    dim : int
-        Embedding dimension
+        1-D time-series signal.
+    embedding_dim : int
+        Number of delayed copies in the time-delay embedding.
     tau : int
-        Time delay
+        Time delay.
     max_dim : int
-        Maximum homology dimension
+        Maximum homology dimension.
 
     Returns
     -------
     float
-        Normalised periodicity score
+        Normalised periodicity score.
     """
-    result = compute_persistence_diagram(signal, dim=dim, tau=tau, max_dim=max_dim)
-    diagrams = result['dgms']
-    if len(diagrams) > 1 and len(diagrams[1]) > 0:
-        persistence_values = diagrams[1][:, 1] - diagrams[1][:, 0]
-        return float(np.max(persistence_values) / np.sqrt(3))
+    result = compute_persistence_diagram(
+        signal, embedding_dim=embedding_dim, tau=tau, max_dim=max_dim)
+    dgms = result['dgms']
+    if len(dgms) > 1 and len(dgms[1]) > 0:
+        h1 = torch.as_tensor(dgms[1], dtype=torch.float)
+        return float(periodicity_from_diagram(h1))
     return 0.0

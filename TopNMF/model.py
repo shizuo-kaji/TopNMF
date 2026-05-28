@@ -8,9 +8,14 @@ import torch.optim as optim
 from sklearn.decomposition._nmf import _initialize_nmf
 from tqdm.auto import tqdm
 
-from .losses import ph_sparsity_loss, total_variation
+from .losses import ph_sparsity_loss, total_variation, _get_diagram
 from .optim import update_V
-from .utils import sparsity_score, center_point_cloud_torch
+from .utils import (
+    sparsity_score,
+    center_point_cloud_torch,
+    l1_l2_sq_ratio,
+    periodicity_from_diagram,
+)
 from .persistence import TimeDelayEmbeddingTorch, GudhiVietorisRipsComplex
 
 PeriodicityTarget = Optional[Union[float, Sequence[Optional[float]]]]
@@ -238,14 +243,11 @@ class TopologicalNMF:
         PH_dims: List[int],
         device: str,
     ) -> torch.Tensor:
-        pd = torch.cat([
-            diagrams[dim].diagram if hasattr(diagrams[dim], "diagram") else diagrams[dim]
-            for dim in PH_dims
-        ])
-        persistence = torch.diff(pd, dim=1).reshape(-1)
-        if len(persistence) > 0:
-            return torch.max(persistence) / np.sqrt(3)
-        return torch.tensor(0.0, device=device)
+        parts = [d for d in (_get_diagram(diagrams, dim) for dim in PH_dims)
+                 if d is not None and d.shape[0] > 0]
+        if not parts:
+            return torch.tensor(0.0, device=device)
+        return periodicity_from_diagram(torch.cat(parts))
 
     @staticmethod
     def _compute_periodicity_loss(
@@ -314,7 +316,7 @@ class TopologicalNMF:
             if target_sparsity is not None:
                 loss_spa_v += (sparsity_score(component) - target_sparsity) ** 2
             else:
-                loss_spa_v += component.abs().sum() ** 2 / ((component ** 2).sum() + 1e-10)
+                loss_spa_v += l1_l2_sq_ratio(component)
 
             sp_score += sparsity_score(component)
 
@@ -330,13 +332,10 @@ class TopologicalNMF:
                     loss_ph += self._compute_periodicity_loss(score, target_value)
 
         norm = float(self.n_components)
-        return loss_ph / norm, loss_spa_v / norm, sp_score / norm, loss_tv_v
+        return loss_ph / norm, loss_spa_v / norm, sp_score / norm, loss_tv_v / norm
 
     def _compute_w_sparsity_loss(self):
-        loss = torch.sum(
-            torch.sum(torch.abs(self.W), dim=1) ** 2 / (torch.sum(self.W ** 2, dim=1) + 1e-10)
-)
-        return loss / float(self.n_components)
+        return l1_l2_sq_ratio(self.W, dim=1).sum() / float(self.n_components)
 
     def _record_losses(self, loss_ph, loss_apx, loss_spa_v, loss_spa_w, optimizer):
         self.losses["PH"].append(loss_ph.item())
@@ -386,7 +385,7 @@ class TopologicalNMF:
         embedding_dim: int = 4,
         tau: Optional[int] = None,
         n_periods: Optional[int] = None,
-        PH_dims: List[int] = [1],
+        PH_dims: Optional[List[int]] = None,
         tol: float = 1e-4,
         tol_count: int = 50000,
         init_method: str = "nndsvda",
@@ -464,6 +463,8 @@ class TopologicalNMF:
         """
         _, n_features = X.shape
         epsilon = 1e-10
+        if PH_dims is None:
+            PH_dims = [1]
 
         X_t = self._initialize_model_tensors(X, init_method, normalize_V_max, epsilon)
         embedder, tau = self._resolve_embedder(n_features, embedding_dim, tau, n_periods)
@@ -536,29 +537,67 @@ class TopologicalNMF:
             if monitor is not None:
                 monitor.update(epoch, self)
 
-            current = (
-                lambda_top * loss_ph
-                + lambda_spa_V * loss_spa_v
-                + lambda_spa_W * loss_spa_w
-                + loss_apx
+            # Early-stopping uses the same composite objective that is optimised.
+            current = float(
+                lambda_top * loss_ph.item()
+                + lambda_spa_V * loss_spa_v.item()
+                + lambda_spa_W * loss_spa_w.item()
+                + lambda_apx * loss_apx.item()
+                + lambda_tv * loss_tv_v.item()
             )
             if (prev_loss - current) < tol:
                 count += 1
                 if count > tol_count:
                     break
             else:
-                prev_loss = current.item()
+                prev_loss = current
                 count = 0
 
         self.W = self.W.detach()
         self.V = self.V.detach()
         return self
 
-    def transform(self, X: np.ndarray) -> np.ndarray:
-        """Get coefficient matrix W (X is ignored; uses fitted W)."""
-        if self.W is None or self.V is None:
+    def transform(self, X: np.ndarray, n_iterations: int = 200,
+                  epsilon: float = 1e-10) -> np.ndarray:
+        """
+        Compute the coefficient matrix W for new data X under the fitted basis V.
+
+        Solves ``min_{W >= 0} || X - W V ||_F^2`` with V held fixed, using
+        non-negative multiplicative updates.
+
+        .. note::
+           Breaking change from earlier versions, where ``transform`` ignored
+           ``X`` and returned the W learned during ``fit``. To recover the
+           training coefficients, use ``model.W`` directly.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Data matrix of shape (n_samples, n_features).
+        n_iterations : int
+            Number of multiplicative-update iterations.
+        epsilon : float
+            Numerical stability constant.
+
+        Returns
+        -------
+        np.ndarray
+            Coefficient matrix W of shape (n_samples, n_components).
+        """
+        if self.V is None:
             raise ValueError("Model must be fitted before transform")
-        return self.W.detach().cpu().numpy()
+        X_t = torch.as_tensor(X, dtype=torch.float, device=self.device)
+        if X_t.shape[1] != self.V.shape[1]:
+            raise ValueError(
+                f"X has {X_t.shape[1]} features but V expects {self.V.shape[1]}")
+
+        V = self.V.detach()
+        VVt = V @ V.T
+        XVt = X_t @ V.T
+        W = torch.rand(X_t.shape[0], self.n_components, device=self.device) + epsilon
+        for _ in range(n_iterations):
+            W *= XVt / (W @ VVt + epsilon)
+        return W.detach().cpu().numpy()
 
     def inverse_transform(self, W: Optional[np.ndarray] = None) -> np.ndarray:
         """Reconstruct data from coefficients."""

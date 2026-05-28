@@ -5,10 +5,53 @@ import torch
 import matplotlib.pyplot as plt
 import gudhi
 import networkx as nx
-from gudhi.point_cloud.timedelay import TimeDelayEmbedding
 from typing import Optional, List, Tuple, Union
 
-from .persistence.graph import GraphFiltrationPH
+from .persistence import (
+    GraphFiltrationPH,
+    GudhiVietorisRipsComplex,
+    CubicalComplex,
+    TimeDelayEmbeddingTorch,
+)
+from .utils import center_point_cloud_torch
+
+
+def _persistence_info_to_gudhi(pers_info: List, tol: float = 1e-6,
+                               absolute: bool = False) -> List[Tuple[int, Tuple[float, float]]]:
+    """
+    Convert a list of ``PersistenceInfo`` (or raw diagrams) to gudhi's
+    ``[(dim, (birth, death)), ...]`` format, dropping infinite and near-diagonal
+    points.
+
+    Parameters
+    ----------
+    pers_info : List
+        Persistence diagrams, one per homology dimension.
+    tol : float
+        Minimum persistence (|death - birth|) for a point to be kept.
+    absolute : bool
+        If True, emit ``(|death|, |birth|)`` (used for superlevel graph
+        filtrations whose filtration values are negated).
+
+    Returns
+    -------
+    list of (int, (float, float))
+        Points in gudhi persistence-diagram format.
+    """
+    gd: List[Tuple[int, Tuple[float, float]]] = []
+    for idx, pi in enumerate(pers_info):
+        dim = int(getattr(pi, "dimension", idx))
+        diagram = pi.diagram if hasattr(pi, "diagram") else pi
+        pts = diagram.detach().cpu().numpy() if isinstance(diagram, torch.Tensor) else np.asarray(diagram)
+        if pts.size == 0:
+            continue
+        mask = np.isfinite(pts).all(axis=1) & (np.abs(pts[:, 1] - pts[:, 0]) > tol)
+        for b, d in pts[mask]:
+            if absolute:
+                gd.append((dim, (abs(float(d)), abs(float(b)))))
+            else:
+                gd.append((dim, (float(b), float(d))))
+    return gd
 
 try:
     from IPython.display import display
@@ -66,9 +109,19 @@ def plot_gallery(images, title: str = "", n_col: int = 5, n_row: int = 5,
 def plot_persistence_diagrams(data, n_col: int = 5, n_row: int = 5,
                               superlevel: bool = False, PHmode: str = "V",
                               embedding_dim: int = 1, tau: int = 1, axs=None,
-                              center_func=None, use_embedding: bool = True):
+                              use_embedding: bool = True):
     """
     Compute and plot persistence diagrams for multiple signals/images.
+
+    Persistence is computed through the package's complex backends
+    (:class:`~TopNMF.persistence.GudhiVietorisRipsComplex` for embedded time
+    series, :class:`~TopNMF.persistence.CubicalComplex` for images), so plots
+    match what :class:`~TopNMF.model.TopologicalNMF` optimises.
+
+    .. note::
+       Breaking change: the ``center_func`` argument was removed. Embedded
+       point clouds are always centred with
+       :func:`~TopNMF.utils.center_point_cloud_torch`.
 
     Parameters
     ----------
@@ -79,17 +132,15 @@ def plot_persistence_diagrams(data, n_col: int = 5, n_row: int = 5,
     superlevel : bool
         Whether to compute superlevel set persistence.
     PHmode : str
-        'V' for vertex-based, 'T' for top-dimensional cells.
+        'V' for vertex-based, 'T' for top-dimensional cells (cubical only).
     embedding_dim : int
         Embedding dimension minus 1.
     tau : int
         Time delay.
     axs : matplotlib axes array, optional
         Pre-existing axes.
-    center_func : callable, optional
-        Point cloud centering function.
     use_embedding : bool
-        Whether to use time-delay embedding.
+        Whether to use time-delay embedding for 1-D signals.
 
     Returns
     -------
@@ -97,25 +148,27 @@ def plot_persistence_diagrams(data, n_col: int = 5, n_row: int = 5,
     """
     if axs is None:
         fig, axs = plt.subplots(n_row, n_col, figsize=(2. * n_col, 2.26 * n_row))
+    axs = np.atleast_2d(axs)
+
+    rips_complex = GudhiVietorisRipsComplex(dim=1, p=2)
+    cubical_complex = CubicalComplex(superlevel=superlevel, mode=PHmode)
 
     for i, comp in enumerate(data[:n_col * n_row]):
-        if not use_embedding or len(comp.shape) > 1:
-            sign = -1 if superlevel else 1
-            if PHmode == "V":
-                cc = gudhi.CubicalComplex(vertices=sign * comp)
-            else:
-                cc = gudhi.CubicalComplex(top_dimensional_cells=sign * comp)
-            pd = cc.persistence()
+        comp_t = torch.as_tensor(np.asarray(comp), dtype=torch.float)
+
+        if not use_embedding or comp_t.ndim > 1:
+            pers_info = cubical_complex(comp_t)
         else:
-            embedder = TimeDelayEmbedding(dim=embedding_dim + 1, delay=tau)
-            embedded = embedder(comp)
-            centered = center_func(embedded) if center_func is not None else embedded
-            rips = gudhi.RipsComplex(points=centered).create_simplex_tree(max_dimension=2)
-            pd = rips.persistence()
+            embedder = TimeDelayEmbeddingTorch(dim=embedding_dim + 1, delay=tau)
+            point_cloud = center_point_cloud_torch(embedder(comp_t))
+            pers_info = rips_complex(point_cloud)
+
+        gd = _persistence_info_to_gudhi(pers_info)
 
         ax = axs[i // n_col, i % n_col]
         ax.clear()
-        gudhi.plot_persistence_diagram(pd, axes=ax, legend=False, fontsize=4)
+        if gd:
+            gudhi.plot_persistence_diagram(gd, axes=ax, legend=False, fontsize=4)
         ax.set_xticks(())
         ax.set_yticks(())
 
@@ -391,14 +444,8 @@ def plot_PD_graph(graphs: List, edge_list: List[Tuple[int, int]],
 
         ax = axs[i // n_col, i % n_col]
         ax.clear()
-        for pi in pers_info:
-            dim = int(getattr(pi, "dimension", 0))
-            pts = pi.diagram.detach().cpu().numpy()
-
-            tol = 1e-6
-            m = np.isfinite(pts).all(axis=1) & (abs(pts[:, 1] - pts[:, 0]) > tol)
-            arr = pts[m]
-            gd_list = [(dim, (np.abs(d), np.abs(b))) for b, d in arr]
+        gd_list = _persistence_info_to_gudhi(pers_info, absolute=True)
+        if gd_list:
             gudhi.plot_persistence_diagram(gd_list, axes=ax, legend=False,
                                            fontsize=4, alpha=0.1)
 
@@ -636,8 +683,9 @@ class FitMonitor:
                     n_col=n_col, n_row=n_row,
                     axs=self._ax_ph, superlevel=self.superlevel)
             else:
-                tau = (self._tau if self._tau is not None
-                       else int(self._n_features / (2 * (self._embedding_dim + 1))))
+                # tau resolved once by fit() and forwarded via setup(); reuse it
+                # so plotted diagrams match the embedding used for training.
+                tau = self._tau if self._tau is not None else 1
                 plot_persistence_diagrams(
                     V_display, n_col=n_col, n_row=n_row,
                     superlevel=self.superlevel, PHmode=self.PHmode,

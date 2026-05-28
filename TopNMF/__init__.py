@@ -24,9 +24,11 @@ from .optim import (
 
 from .utils import (
     sparsity_score,
+    l1_l2_sq_ratio,
     svd_initialization,
     center_point_cloud,
     center_point_cloud_torch,
+    periodicity_from_diagram,
     compute_periodicity_score,
     compute_persistence_diagram,
 )
@@ -78,9 +80,11 @@ __all__ = [
     'sparse_opt_hoyer',
     # Utilities
     'sparsity_score',
+    'l1_l2_sq_ratio',
     'svd_initialization',
     'center_point_cloud',
     'center_point_cloud_torch',
+    'periodicity_from_diagram',
     'compute_periodicity_score',
     'compute_persistence_diagram',
     # Visualization

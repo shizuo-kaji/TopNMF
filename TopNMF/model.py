@@ -8,7 +8,10 @@ import torch.optim as optim
 from sklearn.decomposition._nmf import _initialize_nmf
 from tqdm.auto import tqdm
 
-from .losses import ph_sparsity_loss, total_variation, _get_diagram
+from .losses import (
+    ph_sparsity_loss, total_variation, _get_diagram,
+    wasserstein_reconstruction_loss
+)
 from .optim import update_V
 from .utils import (
     sparsity_score,
@@ -55,6 +58,8 @@ class TopologicalNMF:
         complex: Optional[object] = None,
         ph_loss_fn: Optional[Callable] = None,
         ph_loss_params: Optional[Dict] = None,
+        recon_loss: str = "mse",
+        wasserstein_blur: float = 0.05,
         data_shape: Optional[Tuple] = None,
         use_embedding: bool = False,
     ):
@@ -64,6 +69,8 @@ class TopologicalNMF:
         self.complex = complex
         self.ph_loss_fn = ph_loss_fn if ph_loss_fn is not None else ph_sparsity_loss
         self.ph_loss_params = ph_loss_params if ph_loss_params is not None else {}
+        self.recon_loss = recon_loss
+        self.wasserstein_blur = wasserstein_blur
         self.data_shape = data_shape
         self.use_embedding = use_embedding
 
@@ -474,6 +481,10 @@ class TopologicalNMF:
             optimizer_cls, [self.W, self.V], lr, weight_decay, optimizer_kwargs)
         scheduler = self._build_scheduler(optimizer, scheduler_cls, scheduler_kwargs)
         target_l1 = self._compute_target_l1(n_features, target_sparsity)
+        
+        if self.recon_loss == "wasserstein" and self.data_shape is None:
+            raise ValueError("data_shape must be provided for wasserstein_reconstruction_loss")
+            
         loss_fn = torch.nn.MSELoss()
 
         if monitor is not None:
@@ -498,7 +509,14 @@ class TopologicalNMF:
             loss_spa_w = torch.tensor(0.0, device=self.device)
             sp_score = torch.tensor(0.0, device=self.device)
             loss_tv_v = torch.tensor(0.0, device=self.device)
-            loss_apx = loss_fn(torch.mm(self.W, self.V), X_t)
+            
+            recon_t = torch.mm(self.W, self.V)
+            if self.recon_loss == "wasserstein":
+                loss_apx = wasserstein_reconstruction_loss(
+                    recon_t, X_t, self.data_shape, blur=self.wasserstein_blur
+                )
+            else:
+                loss_apx = loss_fn(recon_t, X_t)
 
             for _ in range(gd_iter):
                 loss_ph, loss_spa_v, sp_score, loss_tv_v = (
@@ -508,7 +526,14 @@ class TopologicalNMF:
                         PH_dims, target_diagrams, target_periodicity,
                         target_sparsity))
                 loss_spa_w = self._compute_w_sparsity_loss()
-                loss_apx = loss_fn(torch.mm(self.W, self.V), X_t)
+                
+                recon_t = torch.mm(self.W, self.V)
+                if self.recon_loss == "wasserstein":
+                    loss_apx = wasserstein_reconstruction_loss(
+                        recon_t, X_t, self.data_shape, blur=self.wasserstein_blur
+                    )
+                else:
+                    loss_apx = loss_fn(recon_t, X_t)
 
                 loss = (
                     lambda_top * loss_ph

@@ -30,6 +30,12 @@ For tests and development tools:
 pip install -e ".[dev]"
 ```
 
+For Wasserstein reconstruction loss support, install the optional `pot` and `geomloss` packages:
+
+```bash
+pip install -e ".[wasserstein]"
+```
+
 The current project metadata installs the persistent-homology backends used by the package, including `gudhi`, `ripser`, and `cripser`.
 
 ## Quick Start
@@ -113,6 +119,8 @@ Important constructor arguments:
 - `complex`: persistence backend; defaults to `GudhiVietorisRipsComplex(dim=1, p=2)`
 - `ph_loss_fn`: topological loss function; defaults to `ph_sparsity_loss`
 - `ph_loss_params`: extra keyword arguments forwarded to `ph_loss_fn`
+- `recon_loss`: reconstruction loss function (`"mse"` or `"wasserstein"`); defaults to `"mse"`
+- `wasserstein_blur`: entropic regularisation parameter for Wasserstein loss; defaults to `0.05`
 - `data_shape`: sample shape for structured inputs such as images
 - `use_embedding`: enables time-delay embedding for 1-D signals
 

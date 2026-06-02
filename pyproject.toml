@@ -53,6 +53,10 @@ notebook = [
   "scikit-image>=0.22",
   "time-series-nmf>=0.1.0.dev0",
 ]
+wasserstein = [
+  "POT",
+  "geomloss",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

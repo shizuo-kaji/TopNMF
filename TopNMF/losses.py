@@ -11,6 +11,10 @@ from typing import List, Optional, Dict
 
 from .utils import l1_l2_sq_ratio
 
+try:
+    import geomloss
+except ImportError:
+    geomloss = None
 
 def _get_diagram(diagrams: List, dim: int) -> Optional[torch.Tensor]:
     """
@@ -305,3 +309,51 @@ def clique_deviation_loss(diagrams: List, PH_dims: List[int],
         loss_PH -= (alpha * term) if dim > 0 else term
 
     return loss_PH
+
+
+def wasserstein_reconstruction_loss(
+    recon: torch.Tensor,
+    target: torch.Tensor,
+    data_shape: tuple,
+    blur: float = 0.05,
+    reach: float = 1.0
+) -> torch.Tensor:
+    """
+    Computes an unbalanced Sinkhorn/Wasserstein divergence between reconstructions and targets.
+    
+    Parameters
+    ----------
+    recon : torch.Tensor
+        Reconstructed data matrix, shape (batch_size, n_features).
+    target : torch.Tensor
+        Target data matrix, shape (batch_size, n_features).
+    data_shape : tuple
+        Spatial dimensions of each sample, e.g., (height, width).
+    blur : float
+        Sinkhorn regularization parameter.
+    reach : float
+        Reach parameter for unbalanced optimal transport.
+        
+    Returns
+    -------
+    torch.Tensor
+        The computed Wasserstein loss.
+    """
+    if geomloss is None:
+        raise ImportError("geomloss is required for wasserstein_reconstruction_loss.")
+
+    device = recon.device
+    batch_size = recon.shape[0]
+    height, width = data_shape
+
+    x_coord = torch.linspace(0, 1, height, device=device)
+    y_coord = torch.linspace(0, 1, width, device=device)
+    grid = torch.stack(torch.meshgrid(x_coord, y_coord, indexing='ij'), dim=-1).reshape(height * width, 2)
+    grid = grid.unsqueeze(0).expand(batch_size, -1, -1).contiguous()
+
+    # Ensure non-negativity
+    recon_pos = torch.nn.functional.relu(recon).contiguous()
+    target_pos = torch.nn.functional.relu(target).contiguous()
+
+    sl = geomloss.SamplesLoss(loss='sinkhorn', p=2, blur=blur, reach=reach)
+    return sl(recon_pos, grid, target_pos, grid).mean()

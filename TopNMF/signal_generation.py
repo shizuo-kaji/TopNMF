@@ -13,7 +13,7 @@ import random
 
 def generate_ichimatsu_pattern(
     num_samples: int = 100,
-    image_shape=(36, 36),
+    image_shape: Tuple[int, int] = (36, 36),
     pat: Optional[np.ndarray] = None,
     pat_step: int = 3,
     min_pat: int = 10,
@@ -21,8 +21,32 @@ def generate_ichimatsu_pattern(
     binarize: bool = False,
     seed: Optional[int] = 42,
 ) -> np.ndarray:
-    if seed is not None:
-        random.seed(seed)
+    """
+    Generate images made of randomly placed copies of a checkerboard patch.
+
+    Parameters
+    ----------
+    num_samples : int
+        Number of images to generate.
+    image_shape : tuple of int
+        Output image shape (height, width).
+    pat : np.ndarray, optional
+        Patch to stamp. Defaults to a 3x3 checkerboard.
+    pat_step : int
+        Grid spacing of the admissible patch positions, in pixels.
+    min_pat, max_pat : int
+        Inclusive bounds on the number of patches stamped per image.
+    binarize : bool
+        If True, clip overlapping stamps to a 0/1 image.
+    seed : int, optional
+        Seed of a private random generator. None leaves it unseeded.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(num_samples, *image_shape)``.
+    """
+    rng = random.Random(seed)
 
     if pat is None:
         pat = np.array([[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=float)
@@ -42,23 +66,23 @@ def generate_ichimatsu_pattern(
     X = np.zeros((num_samples, ih, iw), dtype=np.float64)
 
     for i in range(num_samples):
-        n_patches = random.randint(min_pat, max_pat)
+        n_patches = rng.randint(min_pat, max_pat)
 
         for _ in range(n_patches):
             if max_x_steps > 0:
-                cx = pat_step * random.randint(0, max_x_steps)
+                cx = pat_step * rng.randint(0, max_x_steps)
             else:
-                cx = random.randint(0, ih - ph)
+                cx = rng.randint(0, ih - ph)
 
             if max_y_steps > 0:
-                cy = pat_step * random.randint(0, max_y_steps)
+                cy = pat_step * rng.randint(0, max_y_steps)
             else:
-                cy = random.randint(0, iw - pw)
+                cy = rng.randint(0, iw - pw)
 
             X[i, cx:cx + ph, cy:cy + pw] += pat
 
-            if binarize:
-                X[i] = (X[i] > 0).astype(np.float64)
+        if binarize:
+            X[i] = (X[i] > 0).astype(np.float64)
 
     return X
 
@@ -68,6 +92,7 @@ def generate_signals(
     kind: str = "cosine",
     num: int = 2,
     noise: float = 0.0,
+    seed: Optional[int] = None,
 ) -> List[np.ndarray]:
     """
     Generate either cosine-based or triangle-like signals with linear trends.
@@ -83,6 +108,9 @@ def generate_signals(
         Number of signals to generate. Default is 2.
     noise : float, optional
         Standard deviation of additive Gaussian noise. Default is 0.0.
+    seed : int, optional
+        Seed of a private noise generator. Only used when *noise* > 0;
+        None draws from the global NumPy generator.
 
     Returns
     -------
@@ -101,11 +129,13 @@ def generate_signals(
     amplitudes = np.linspace(2.0, 1.0, num)
     slopes = np.linspace(1.0, 2.0, num)
 
+    noise_rng = np.random.default_rng(seed) if noise > 0 else None
+
     signals = []
     for a, b in zip(amplitudes, slopes):
         s = base_fn(a, b)
-        if noise > 0:
-            s = s + noise * np.random.randn(len(t))
+        if noise_rng is not None:
+            s = s + noise * noise_rng.standard_normal(len(t))
         signals.append(s / np.max(np.abs(s)) if np.max(np.abs(s)) > 0 else s)
 
     return signals

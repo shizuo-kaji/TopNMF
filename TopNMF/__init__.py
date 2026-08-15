@@ -57,7 +57,7 @@ from .signal_generation import (
     normalize_signals,
 )
 
-__version__ = '1.0.0'
+__version__ = '1.0.0'  # Keep in sync with pyproject.toml::version
 __all__ = [
     # Main class
     'TopologicalNMF',

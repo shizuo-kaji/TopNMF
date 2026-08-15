@@ -45,7 +45,8 @@ For Wasserstein reconstruction loss support, install the optional `pot` and `geo
 pip install -e ".[wasserstein]"
 ```
 
-For running the example notebooks:
+For running the example notebooks (adds `pandas`, `scikit-image`, `wfdb`, and the
+baselines used for comparison):
 
 ```bash
 pip install -e ".[notebook]"
@@ -55,16 +56,26 @@ The package installs the persistent-homology backends `gudhi` and `cripser`.
 
 ## Quick Start
 
+The topological term of the objective is `lambda_top * (diagram loss + periodicity
+loss)`. The diagram loss is the `ph_loss_fn` passed to the constructor, and the
+periodicity loss comes from the `target_periodicity` argument of `fit()`. Both are
+opt-in: with neither of them set, `fit()` performs plain NMF regardless of
+`lambda_top`.
+
 ### Time-Series Decomposition
 
 ```python
 import numpy as np
-from TopNMF import TopologicalNMF, generate_signals
+from TopNMF import TopologicalNMF, generate_signals, ph_sparsity_loss
 
 t = np.linspace(0.0, 4.0 * np.pi, 200)
 X = np.vstack(generate_signals(t, kind="cosine", num=4))
 
-model = TopologicalNMF(n_components=2, use_embedding=True)
+model = TopologicalNMF(
+    n_components=2,
+    use_embedding=True,
+    ph_loss_fn=ph_sparsity_loss,
+)
 model.fit(
     X,
     n_iterations=300,
@@ -79,10 +90,38 @@ reconstruction = model.inverse_transform()
 losses = model.get_losses()
 ```
 
+### Targeting Periodic and Non-Periodic Components
+
+`target_periodicity` assigns a target periodicity score to each basis vector. The
+targets are sorted and matched by rank to the components sorted by their current
+score, so `[1.0, 0.0]` asks for one rhythm-like and one non-periodic basis.
+
+```python
+model = TopologicalNMF(n_components=2, use_embedding=True, random_state=0)
+model.fit(
+    X,
+    n_iterations=300,
+    lambda_top=1e-2,
+    target_periodicity=[1.0, 0.0],
+    embedding_dim=4,
+    PH_dims=[1],
+    verbose=False,
+)
+
+from TopNMF import compute_periodicity_score
+
+scores = [
+    compute_periodicity_score(v, embedding_dim=5, tau=4)
+    for v in model.get_components()
+]
+```
+
 ### Image Decomposition with Cubical Persistence
 
 ```python
-from TopNMF import CubicalComplex, TopologicalNMF, generate_ichimatsu_pattern
+from TopNMF import (
+    CubicalComplex, TopologicalNMF, generate_ichimatsu_pattern, ph_sparsity_loss,
+)
 
 images = generate_ichimatsu_pattern(
     num_samples=8,
@@ -96,21 +135,28 @@ X = images.reshape(images.shape[0], -1)
 model = TopologicalNMF(
     n_components=3,
     complex=CubicalComplex(mode="V"),
+    ph_loss_fn=ph_sparsity_loss,
     data_shape=(24, 24),
 )
 model.fit(X, n_iterations=200, lambda_top=1e-2, verbose=False)
 ```
 
+To match a prescribed diagram instead, use `ph_loss_fn=target_diagram_loss` and pass
+`target_diagrams=[...]` to `fit()`.
+
 ### Graph Decomposition
 
 ```python
-from TopNMF import GraphFiltrationPH, TopologicalNMF, generate_edge_weighted_graph
+from TopNMF import (
+    GraphFiltrationPH, TopologicalNMF, generate_edge_weighted_graph, ph_sparsity_loss,
+)
 
 X, edge_list = generate_edge_weighted_graph()
 
 model = TopologicalNMF(
     n_components=3,
     complex=GraphFiltrationPH(max_dim=1),
+    ph_loss_fn=ph_sparsity_loss,
 )
 model.fit(
     X,
@@ -132,7 +178,7 @@ Important constructor arguments:
 - `n_components`: number of basis vectors
 - `device`: `"cpu"` or `"cuda"`
 - `complex`: persistence backend; defaults to `GudhiVietorisRipsComplex(dim=1, p=2)`
-- `ph_loss_fn`: topological loss function; defaults to `ph_sparsity_loss`
+- `ph_loss_fn`: diagram loss function; `None` (the default) applies no diagram loss
 - `ph_loss_params`: extra keyword arguments forwarded to `ph_loss_fn`
 - `recon_loss`: reconstruction loss function (`"mse"` or `"wasserstein"`); defaults to `"mse"`
 - `wasserstein_blur`: entropic regularisation parameter for Wasserstein loss; defaults to `0.05`
@@ -159,7 +205,9 @@ Important `fit()` arguments:
 Main methods:
 
 - `fit(X, ...)`: train the model on a non-negative data matrix of shape `(n_samples, n_features)`
-- `transform(X)`: compute coefficient matrix `W` for new data (solves NMF with V fixed)
+- `transform(X)`: compute coefficient matrix `W` for new data (solves NMF with V fixed;
+  set `random_state` for a reproducible result). To recover the coefficients learned
+  during `fit`, read `model.W` instead.
 - `inverse_transform(W=None)`: reconstruct data from coefficients
 - `get_components()`: return the learned basis matrix `V`
 - `get_losses()`: return the tracked loss history

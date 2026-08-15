@@ -9,8 +9,7 @@ from sklearn.decomposition._nmf import _initialize_nmf
 from tqdm.auto import tqdm
 
 from .losses import (
-    ph_sparsity_loss, total_variation, _get_diagram,
-    wasserstein_reconstruction_loss
+    total_variation, _get_diagram, wasserstein_reconstruction_loss
 )
 from .optim import update_V
 from .utils import (
@@ -41,7 +40,11 @@ class TopologicalNMF:
         Defaults to GudhiVietorisRipsComplex with time-delay embedding.
     ph_loss_fn : callable, optional
         PH loss function with signature ``(diagrams, PH_dims, target_diagrams, device, **kwargs)``.
-        Defaults to ph_sparsity_loss.
+        When None (the default) no diagram-shape loss is applied, and the
+        topological term of :meth:`fit` consists only of the
+        ``target_periodicity`` penalty (if requested). Set it explicitly, e.g.
+        to :func:`~TopNMF.losses.ph_sparsity_loss` or
+        :func:`~TopNMF.losses.target_diagram_loss`, to add a diagram loss.
     ph_loss_params : dict, optional
         Extra keyword arguments forwarded to *ph_loss_fn*.
     data_shape : tuple, optional
@@ -67,7 +70,7 @@ class TopologicalNMF:
         self.device = device
         self.random_state = random_state
         self.complex = complex
-        self.ph_loss_fn = ph_loss_fn if ph_loss_fn is not None else ph_sparsity_loss
+        self.ph_loss_fn = ph_loss_fn
         self.ph_loss_params = ph_loss_params if ph_loss_params is not None else {}
         self.recon_loss = recon_loss
         self.wasserstein_blur = wasserstein_blur
@@ -225,11 +228,16 @@ class TopologicalNMF:
 
     @staticmethod
     def _match_periodicity_targets_by_rank(
-        periodicity_scores: List[torch.Tensor],
+        periodicity_scores: List[Optional[torch.Tensor]],
         targets: List[Optional[float]],
     ) -> List[Optional[float]]:
+        """Assign sorted targets to components sorted by current periodicity.
+
+        ``periodicity_scores`` is indexed by component and may contain None for
+        components without a score; those components receive no target.
+        """
         score_order = sorted(
-            range(len(periodicity_scores)),
+            (idx for idx, score in enumerate(periodicity_scores) if score is not None),
             key=lambda idx: float(periodicity_scores[idx].detach().cpu()),
         )
         target_order = sorted(
@@ -239,6 +247,8 @@ class TopologicalNMF:
 
         matched_targets: List[Optional[float]] = [None] * len(targets)
         for rank, target_idx in enumerate(target_order):
+            if rank >= len(score_order):
+                break
             target_value = targets[target_idx]
             if target_value is not None:
                 matched_targets[score_order[rank]] = target_value
@@ -303,23 +313,30 @@ class TopologicalNMF:
         )
         periodicity_scores: List[Optional[torch.Tensor]] = [None] * self.n_components
 
+        # A diagram is needed for the diagram loss and for periodicity targets.
+        needs_diagram = apply_topology and (
+            self.ph_loss_fn is not None or compute_periodicity)
+
         for idx in range(self.n_components):
             component = self.V[idx]
 
-            if apply_topology:
-                needs_diagram = target_diagrams is not None or compute_periodicity
-                if needs_diagram:
-                    diagrams = self._compute_component_diagrams(
-                        component, embedder, ph_complex, complex_inputs)
-                    if target_diagrams is not None:
-                        loss_ph += self.ph_loss_fn(
-                            diagrams, PH_dims, target_diagrams, self.device,
-                            **self.ph_loss_params)
-                    if compute_periodicity:
-                        periodicity_scores[idx] = self._compute_periodicity_score(
-                            diagrams, PH_dims, self.device)
+            if needs_diagram:
+                diagrams = self._compute_component_diagrams(
+                    component, embedder, ph_complex, complex_inputs)
+                if self.ph_loss_fn is not None:
+                    loss_ph += self.ph_loss_fn(
+                        diagrams, PH_dims, target_diagrams, self.device,
+                        **self.ph_loss_params)
+                if compute_periodicity:
+                    periodicity_scores[idx] = self._compute_periodicity_score(
+                        diagrams, PH_dims, self.device)
 
-            loss_tv_v += total_variation(component)
+            # Structured samples get their 2-D total variation, not the
+            # flattened one, which would wrap around row boundaries.
+            loss_tv_v += total_variation(
+                component.reshape(self.data_shape)
+                if self.data_shape is not None and len(self.data_shape) == 2
+                else component)
             if target_sparsity is not None:
                 loss_spa_v += (sparsity_score(component) - target_sparsity) ** 2
             else:
@@ -328,18 +345,23 @@ class TopologicalNMF:
             sp_score += sparsity_score(component)
 
         if compute_periodicity:
-            scores = [score for score in periodicity_scores if score is not None]
             matched_targets = self._match_periodicity_targets_by_rank(
-                scores, periodicity_targets)
+                periodicity_scores, periodicity_targets)
             for idx, target_value in enumerate(matched_targets):
                 if target_value is not None:
-                    score = periodicity_scores[idx]
-                    if score is None:
-                        continue
-                    loss_ph += self._compute_periodicity_loss(score, target_value)
+                    loss_ph += self._compute_periodicity_loss(
+                        periodicity_scores[idx], target_value)
 
         norm = float(self.n_components)
         return loss_ph / norm, loss_spa_v / norm, sp_score / norm, loss_tv_v / norm
+
+    def _reconstruction_loss(self, X_t, loss_fn):
+        """Reconstruction loss of ``W V`` against ``X`` for the configured metric."""
+        recon_t = torch.mm(self.W, self.V)
+        if self.recon_loss == "wasserstein":
+            return wasserstein_reconstruction_loss(
+                recon_t, X_t, self.data_shape, blur=self.wasserstein_blur)
+        return loss_fn(recon_t, X_t)
 
     def _compute_w_sparsity_loss(self):
         return l1_l2_sq_ratio(self.W, dim=1).sum() / float(self.n_components)
@@ -484,7 +506,12 @@ class TopologicalNMF:
         
         if self.recon_loss == "wasserstein" and self.data_shape is None:
             raise ValueError("data_shape must be provided for wasserstein_reconstruction_loss")
-            
+        if target_diagrams is not None and self.ph_loss_fn is None:
+            raise ValueError(
+                "target_diagrams was given but ph_loss_fn is None, so the targets "
+                "would be ignored. Pass e.g. ph_loss_fn=target_diagram_loss to "
+                "TopologicalNMF(...).")
+
         loss_fn = torch.nn.MSELoss()
 
         if monitor is not None:
@@ -509,14 +536,8 @@ class TopologicalNMF:
             loss_spa_w = torch.tensor(0.0, device=self.device)
             sp_score = torch.tensor(0.0, device=self.device)
             loss_tv_v = torch.tensor(0.0, device=self.device)
-            
-            recon_t = torch.mm(self.W, self.V)
-            if self.recon_loss == "wasserstein":
-                loss_apx = wasserstein_reconstruction_loss(
-                    recon_t, X_t, self.data_shape, blur=self.wasserstein_blur
-                )
-            else:
-                loss_apx = loss_fn(recon_t, X_t)
+            if gd_iter <= 0:
+                loss_apx = self._reconstruction_loss(X_t, loss_fn)
 
             for _ in range(gd_iter):
                 loss_ph, loss_spa_v, sp_score, loss_tv_v = (
@@ -526,14 +547,7 @@ class TopologicalNMF:
                         PH_dims, target_diagrams, target_periodicity,
                         target_sparsity))
                 loss_spa_w = self._compute_w_sparsity_loss()
-                
-                recon_t = torch.mm(self.W, self.V)
-                if self.recon_loss == "wasserstein":
-                    loss_apx = wasserstein_reconstruction_loss(
-                        recon_t, X_t, self.data_shape, blur=self.wasserstein_blur
-                    )
-                else:
-                    loss_apx = loss_fn(recon_t, X_t)
+                loss_apx = self._reconstruction_loss(X_t, loss_fn)
 
                 loss = (
                     lambda_top * loss_ph
@@ -608,6 +622,12 @@ class TopologicalNMF:
         -------
         np.ndarray
             Coefficient matrix W of shape (n_samples, n_components).
+
+        Notes
+        -----
+        The multiplicative updates start from a random W. When ``random_state``
+        was set on the estimator the draw is seeded, so repeated calls return
+        the same coefficients.
         """
         if self.V is None:
             raise ValueError("Model must be fitted before transform")
@@ -619,7 +639,12 @@ class TopologicalNMF:
         V = self.V.detach()
         VVt = V @ V.T
         XVt = X_t @ V.T
-        W = torch.rand(X_t.shape[0], self.n_components, device=self.device) + epsilon
+        generator = None
+        if self.random_state is not None:
+            generator = torch.Generator(device=self.device)
+            generator.manual_seed(int(self.random_state))
+        W = torch.rand(X_t.shape[0], self.n_components, device=self.device,
+                       generator=generator) + epsilon
         for _ in range(n_iterations):
             W *= XVt / (W @ VVt + epsilon)
         return W.detach().cpu().numpy()

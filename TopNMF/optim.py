@@ -164,3 +164,76 @@ def sparse_opt_hoyer(x: np.ndarray, L1: float, L2: float = 1,
                 s[i] -= c_adj
 
     return np.maximum(s, 0)
+
+
+def project_rows_max_norm(V: torch.Tensor) -> torch.Tensor:
+    """
+    Euclidean projection of every row onto the maximum-normalised set.
+
+    Projects each row of *V* onto
+
+    .. math::
+        \\mathcal S = \\{v \\in \\mathbb R^d_{\\geq 0} : \\|v\\|_\\infty = 1\\},
+
+    the scale-fixed feasible set that removes the NMF row-scaling ambiguity
+    ``(W D)(D^{-1} V) = W V``.
+
+    ``S`` is the union over coordinates ``k`` of the faces
+    ``F_k = {x in [0,1]^d : x_k = 1}``.  Projecting onto ``F_k`` clips every
+    coordinate to ``[0, 1]`` and sets coordinate ``k`` to one, so
+
+    .. math::
+        \\mathrm{dist}^2(v, F_k)
+        = \\sum_i (\\mathrm{clip}(v_i) - v_i)^2 - (\\mathrm{clip}(v_k) - v_k)^2
+          + (1 - v_k)^2 .
+
+    Only the last two terms depend on ``k``, and their sum is decreasing in
+    ``v_k`` on ``(-\\infty, 1]`` and identically zero for ``v_k \\geq 1``.  The
+    optimal face is therefore always ``k = \\arg\\max_i v_i``, giving the
+    closed form used here: clip to ``[0, 1]``, then pin the argmax coordinate
+    to one.
+
+    Unlike dividing a row by its maximum, this is a genuine metric projection,
+    so it is well defined on a zero row (which maps to a vertex of the cube)
+    and needs no numerical floor.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Basis matrix of shape (n_components, n_features). Rows may have
+        arbitrary sign and scale.
+
+    Returns
+    -------
+    torch.Tensor
+        New tensor of the same shape whose rows lie in ``S``.
+    """
+    argmax = torch.argmax(V, dim=1, keepdim=True)
+    projected = V.clamp(min=0.0, max=1.0)
+    return projected.scatter(1, argmax, 1.0)
+
+
+def scale_rows_max_norm(V: torch.Tensor, epsilon: float = 1e-10) -> torch.Tensor:
+    """
+    Rescale every non-negative row to unit maximum.
+
+    For a non-negative non-zero row this returns the canonical representative
+    ``v / \\|v\\|_\\infty`` of its scaling orbit, which lies in ``S`` without
+    distorting the row's shape. It is the legacy normalisation of
+    :meth:`~TopNMF.model.TopologicalNMF.fit` and the natural way to enter the
+    feasible set from an arbitrarily scaled initialisation, but it is not the
+    Euclidean projection onto ``S`` and is ill-conditioned near a zero row.
+
+    Parameters
+    ----------
+    V : torch.Tensor
+        Basis matrix of shape (n_components, n_features).
+    epsilon : float
+        Numerical floor added to each row maximum.
+
+    Returns
+    -------
+    torch.Tensor
+        New tensor of the same shape with unit row maxima.
+    """
+    return V / (torch.max(V, dim=1, keepdim=True).values + epsilon)

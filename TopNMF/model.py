@@ -1,5 +1,6 @@
 """TopologicalNMF: NMF with topological constraints via persistent homology."""
 
+import warnings
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -11,7 +12,7 @@ from tqdm.auto import tqdm
 from .losses import (
     total_variation, _get_diagram, wasserstein_reconstruction_loss
 )
-from .optim import update_V
+from .optim import update_V, project_rows_max_norm, scale_rows_max_norm
 from .utils import (
     sparsity_score,
     center_point_cloud_torch,
@@ -21,6 +22,7 @@ from .utils import (
 from .persistence import TimeDelayEmbeddingTorch, GudhiVietorisRipsComplex
 
 PeriodicityTarget = Optional[Union[float, Sequence[Optional[float]]]]
+BASIS_NORMALIZATIONS = ("project", "scale", "none")
 
 
 class TopologicalNMF:
@@ -112,14 +114,22 @@ class TopologicalNMF:
             )
         return W, V
 
-    def _initialize_model_tensors(self, X, init_method, normalize_v_max, epsilon):
+    def _initialize_model_tensors(self, X, init_method, basis_normalization, epsilon):
         W, V = self.initialize_factors(X, method=init_method)
         X_t = torch.as_tensor(X, dtype=torch.float, device=self.device)
         self.W = torch.tensor(W, dtype=torch.float, device=self.device, requires_grad=True)
         self.V = torch.tensor(V, dtype=torch.float, device=self.device, requires_grad=True)
-        if normalize_v_max:
+        if basis_normalization != "none":
+            # The initialiser returns an arbitrarily scaled basis. Entering the
+            # feasible set by rescaling rather than by projecting avoids
+            # clipping a row whose maximum happens to exceed one, which would
+            # flatten its shape before the first gradient step; the rescaled row
+            # is already the exact orbit representative, so the subsequent
+            # projection is a no-op except on a degenerate zero row.
             with torch.no_grad():
-                self._normalize_v_rows_max(epsilon)
+                self.V.copy_(scale_rows_max_norm(self.V.clamp(min=0), epsilon))
+                if basis_normalization == "project":
+                    self.V.copy_(project_rows_max_norm(self.V))
         return X_t
 
     # ------------------------------------------------------------------
@@ -377,18 +387,38 @@ class TopologicalNMF:
     # Constraints
     # ------------------------------------------------------------------
 
-    def _normalize_v_rows_max(self, epsilon):
-        normal_value = torch.max(self.V, dim=1).values.unsqueeze(1)
-        self.V /= normal_value + epsilon
+    @staticmethod
+    def _resolve_basis_normalization(basis_normalization, normalize_V_max):
+        """Resolve the basis-row constraint, honouring the deprecated flag."""
+        if normalize_V_max is not None:
+            warnings.warn(
+                "normalize_V_max is deprecated; use "
+                "basis_normalization='project' (Euclidean projection onto "
+                "{v >= 0 : max(v) = 1}, the default), 'scale' for the legacy "
+                "divide-by-maximum rescaling, or 'none'.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            return "project" if normalize_V_max else "none"
+        if basis_normalization not in BASIS_NORMALIZATIONS:
+            raise ValueError(
+                f"basis_normalization must be one of {BASIS_NORMALIZATIONS}, "
+                f"got {basis_normalization!r}")
+        return basis_normalization
 
-    def _apply_constraints(self, normalize, normalize_v_max, epsilon):
+    def _apply_constraints(self, normalize, basis_normalization, epsilon):
         with torch.no_grad():
-            self.V.clamp_(min=0)
             self.W.clamp_(min=0)
             if normalize:
                 self.W /= torch.norm(self.W, p=1, dim=1, keepdim=True) + epsilon
-            if normalize_v_max:
-                self._normalize_v_rows_max(epsilon)
+            if basis_normalization == "project":
+                # Euclidean projection onto S^r; subsumes the non-negativity
+                # clamp because it clips every coordinate to [0, 1].
+                self.V.copy_(project_rows_max_norm(self.V))
+            else:
+                self.V.clamp_(min=0)
+                if basis_normalization == "scale":
+                    self.V.copy_(scale_rows_max_norm(self.V, epsilon))
 
     # ------------------------------------------------------------------
     # Public API
@@ -419,7 +449,8 @@ class TopologicalNMF:
         tol_count: int = 50000,
         init_method: str = "nndsvda",
         normalize: bool = False,
-        normalize_V_max: bool = False,
+        basis_normalization: str = "project",
+        normalize_V_max: Optional[bool] = None,
         start_epoch_topological: int = 0,
         complex_inputs: Optional[Dict[str, object]] = None,
         optimizer_cls: Callable = optim.AdamW,
@@ -471,8 +502,19 @@ class TopologicalNMF:
             NMF initialisation ('random', 'nndsvda', 'nndsvd', 'nndsvdar').
         normalize : bool
             L1-normalise W rows each epoch.
-        normalize_V_max : bool
-            Normalise V rows by their max each epoch.
+        basis_normalization : {'project', 'scale', 'none'}
+            Constraint applied to the basis rows after every epoch.
+            ``'project'`` (the default) is the Euclidean projection onto
+            ``S = {v >= 0 : max(v) = 1}``, which fixes the row scale that the
+            factorisation ``(W D)(D^{-1} V) = W V`` leaves free and makes a
+            scale-dependent topological score well posed. ``'scale'`` is the
+            legacy rescaling ``v / max(v)``, which lands in the same set but is
+            not a metric projection. ``'none'`` leaves the rows unconstrained
+            apart from non-negativity.
+        normalize_V_max : bool, optional
+            Deprecated alias. True maps to ``basis_normalization='project'``
+            and False to ``'none'``; leave it None to use
+            *basis_normalization*.
         start_epoch_topological : int
             Epoch at which topological loss activates.
         complex_inputs : dict, optional
@@ -495,7 +537,11 @@ class TopologicalNMF:
         if PH_dims is None:
             PH_dims = [1]
 
-        X_t = self._initialize_model_tensors(X, init_method, normalize_V_max, epsilon)
+        basis_normalization = self._resolve_basis_normalization(
+            basis_normalization, normalize_V_max)
+
+        X_t = self._initialize_model_tensors(
+            X, init_method, basis_normalization, epsilon)
         embedder, tau = self._resolve_embedder(n_features, embedding_dim, tau, n_periods)
         ph_complex = self._resolve_complex()
 
@@ -565,7 +611,7 @@ class TopologicalNMF:
                 self._record_losses(loss_ph, loss_apx, loss_spa_v, loss_spa_w,
                                     optimizer)
 
-            self._apply_constraints(normalize, normalize_V_max, epsilon)
+            self._apply_constraints(normalize, basis_normalization, epsilon)
 
             if verbose:
                 progress.set_postfix(

@@ -20,6 +20,8 @@ from .optim import (
     update_V,
     sparse_opt,
     sparse_opt_hoyer,
+    project_rows_max_norm,
+    scale_rows_max_norm,
 )
 
 from .utils import (
@@ -78,6 +80,8 @@ __all__ = [
     'update_V',
     'sparse_opt',
     'sparse_opt_hoyer',
+    'project_rows_max_norm',
+    'scale_rows_max_norm',
     # Utilities
     'sparsity_score',
     'l1_l2_sq_ratio',

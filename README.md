@@ -195,7 +195,13 @@ Important `fit()` arguments:
 - `embedding_dim`, `tau`, `n_periods`, `PH_dims`: persistent-homology configuration
 - `tol`, `tol_count`: early-stopping tolerance and patience
 - `init_method`: NMF initialisation method (default `"nndsvda"`)
-- `normalize`, `normalize_V_max`: optional post-step normalisation
+- `normalize`: optional L1 normalisation of the coefficient rows after each step
+- `basis_normalization`: constraint on the basis rows after each step —
+  `"project"` (default) is the Euclidean projection onto
+  `S = {v >= 0 : max(v) = 1}`, which fixes the row scale left free by
+  `(W D)(D^-1 V) = W V`; `"scale"` is the legacy `v / max(v)` rescaling and
+  `"none"` imposes non-negativity only. `normalize_V_max` is a deprecated
+  alias (`True` -> `"project"`, `False` -> `"none"`)
 - `start_epoch_topological`: delay before topological loss activates
 - `optimizer_cls`, `optimizer_kwargs`: optimizer class and extra arguments (default `AdamW`)
 - `scheduler_cls`, `scheduler_kwargs`: learning-rate scheduler (default `ReduceLROnPlateau`)

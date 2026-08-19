@@ -1,5 +1,7 @@
 """Visualisation utilities for TopNMF."""
 
+import os
+
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
@@ -598,6 +600,9 @@ class FitMonitor:
 
         Parameters
         ----------
+        path : str or os.PathLike
+            Destination file. The extension selects the container when
+            ``imageio`` is unavailable and matplotlib's writers are used.
         show : list of str, optional
             Panels to include in the video: any subset of ``['loss', 'basis', 'PH']``.
             Defaults to all panels that have captured frames.
@@ -611,6 +616,7 @@ class FitMonitor:
         if not frames:
             return
 
+        path = os.fspath(path)
         ext = path.rsplit('.', 1)[-1].lower() if '.' in path else 'mp4'
 
         try:
